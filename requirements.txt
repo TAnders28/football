@@ -1,2 +1,6 @@
-﻿# Add dependencies as the pipeline grows
-
+# Add dependencies as the pipeline grows
+nflreadpy
+polars
+pyarrow
+pandas
+requests
