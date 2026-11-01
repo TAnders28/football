@@ -25,3 +25,7 @@ Thumbs.db
 *.json
 !package.json
 !tsconfig*.json
+
+# Hand-picked example outputs for reading (small, tracked)
+!/examples/
+!/examples/*.json
