@@ -1,13 +1,27 @@
 r"""
-Pull NFL seasons from nflverse (via nflreadpy) into local parquet files.
+Pull NFL seasons from nflverse (via nflreadpy) and store them as readable JSON / JSONL.
 
     .venv\Scripts\python.exe GetSeasonGames.py --season 2023,2024,2025,2026 [--refresh]
 
+Data is pulled into polars DataFrames, converted to plain Python records, and only then
+written to disk -- no parquet is stored. Mirrors the baseball repo (games_<season>.json,
+.jsonl for big per-row tables).
+
 Per season writes:
-    data/backtest/games_<season>.parquet         one row per game (scores, spread/total/ML, weather, QBs)
-    data/backtest/pull_summary_<season>.json     counts + pull timestamp
-    data/playbyplay/pbp_<season>.parquet         one row per play (~370 cols: EPA, WPA, air yards, ...)
-    data/playbyplay/player_week_<season>.parquet one row per player per week
+    data/backtest/games_<season>.json           JSON array, one object per game, pretty-printed
+                                                (scores, spread/total/ML, weather, QBs, ...)
+    data/backtest/pull_summary_<season>.json    counts + pull timestamp
+    data/playbyplay/pbp_<season>.jsonl          JSONL, one play per line (~370 nflverse cols:
+                                                EPA, WPA, air yards, ...). JSONL rather than one
+                                                big JSON array so it stays streamable/greppable.
+    data/playbyplay/player_week_<season>.jsonl  JSONL, one player-week per line
+
+Format choices:
+    - games are small (~285/season) so they get an indented JSON array for easy reading.
+    - pbp / player_week are large, so they are compact JSONL (one record per line).
+    - in the JSONL files, null fields are omitted from each record to keep size and noise
+      down; a missing key means null. games JSON keeps every key (nulls included).
+    - dates/datetimes are written as ISO strings.
 
 Seasons that already have every output are skipped unless --refresh is given.
 """
@@ -15,7 +29,7 @@ Seasons that already have every output are skipped unless --refresh is given.
 import argparse
 import json
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import nflreadpy as nfl
 import polars as pl
@@ -27,11 +41,32 @@ PBP_DIR = os.path.join(ROOT, "data", "playbyplay")
 
 def OutputPaths(season: int) -> dict:
     return {
-        "games": os.path.join(BACKTEST_DIR, f"games_{season}.parquet"),
+        "games": os.path.join(BACKTEST_DIR, f"games_{season}.json"),
         "summary": os.path.join(BACKTEST_DIR, f"pull_summary_{season}.json"),
-        "pbp": os.path.join(PBP_DIR, f"pbp_{season}.parquet"),
-        "player_week": os.path.join(PBP_DIR, f"player_week_{season}.parquet"),
+        "pbp": os.path.join(PBP_DIR, f"pbp_{season}.jsonl"),
+        "player_week": os.path.join(PBP_DIR, f"player_week_{season}.jsonl"),
     }
+
+
+def JsonDefault(value):
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return str(value)
+
+
+def WriteJson(df: pl.DataFrame, path: str) -> None:
+    """Pretty JSON array of every row (all keys kept)."""
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(df.to_dicts(), f, indent=2, default=JsonDefault)
+
+
+def WriteJsonl(df: pl.DataFrame, path: str) -> None:
+    """One compact JSON object per line, null fields dropped."""
+    with open(path, "w", encoding="utf-8") as f:
+        for row in df.iter_rows(named=True):
+            record = {k: v for k, v in row.items() if v is not None}
+            f.write(json.dumps(record, separators=(",", ":"), default=JsonDefault))
+            f.write("\n")
 
 
 def PullSeason(season: int, refresh: bool) -> None:
@@ -47,9 +82,9 @@ def PullSeason(season: int, refresh: bool) -> None:
     print(f"[{season}] weekly player stats...")
     players = nfl.load_player_stats(seasons=[season], summary_level="week")
 
-    games.write_parquet(paths["games"])
-    pbp.write_parquet(paths["pbp"])
-    players.write_parquet(paths["player_week"])
+    WriteJson(games, paths["games"])
+    WriteJsonl(pbp, paths["pbp"])
+    WriteJsonl(players, paths["player_week"])
 
     completed = games.filter(pl.col("result").is_not_null())
     summary = {
@@ -65,7 +100,7 @@ def PullSeason(season: int, refresh: bool) -> None:
         "player_week_rows": players.height,
         "player_week_players": players["player_id"].n_unique() if players.height else 0,
     }
-    with open(paths["summary"], "w") as f:
+    with open(paths["summary"], "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
     print(f"[{season}] games {summary['games_completed']}/{summary['games_scheduled']} completed"
