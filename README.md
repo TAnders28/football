@@ -1,6 +1,6 @@
 ﻿# football
 
-NFL predictive modelling and backtesting, structured like the baseball project.
+NFL predictive modelling and backtesting.
 
 ## Layout
 
