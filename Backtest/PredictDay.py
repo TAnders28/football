@@ -1,16 +1,21 @@
 r"""
-Same-day NFL picks: score tonight's slate (or the next upcoming one) with the backtested strategies.
+PredictDay(date): NFL picks for one ET gameday with the backtested strategies (same API as basketball's
+Backtest.PredictDay). Same-day = pass today's date.
 
-    .venv\Scripts\python.exe -m Backtest.PredictToday                 # today's ET slate, else the next one
-    .venv\Scripts\python.exe -m Backtest.PredictToday --week          # every remaining game in that NFL week
-    .venv\Scripts\python.exe -m Backtest.PredictToday --date 2026-11-08
-    .venv\Scripts\python.exe -m Backtest.PredictToday --no-refresh    # use the last saved schedule, no download
+    .venv\Scripts\python.exe -m Backtest.PredictDay --date 2026-11-05            # that ET gameday
+    .venv\Scripts\python.exe -m Backtest.PredictDay --date 2026-11-05 --week     # that day + rest of its NFL week
+    .venv\Scripts\python.exe -m Backtest.PredictDay --date 2026-11-04 --next     # no games that day -> next slate
+    .venv\Scripts\python.exe -m Backtest.PredictDay --date 2026-11-05 --no-refresh   # last saved schedule
+    (--date defaults to today in America/New_York; --season defaults from the date)
+
+    from Backtest.PredictDay import PredictDay; out = PredictDay("2026-11-05")   # {"meta", "games", "markdown"}
 
 What it does
-  1. Refreshes this season's schedule + posted lines from nflverse (nflreadpy.load_schedules, schedule only,
-     a few seconds) into data/backtest/today/schedule_<season>.json with a pulled-at timestamp.
+  1. Refreshes the season's schedule + posted lines from nflverse (nflreadpy.load_schedules, schedule only)
+     into data/backtest/today/schedule_<season>.json with a pulled-at timestamp.
      Without a fresh pull it falls back to data/backtest/games_<season>.json (GetSeasonGames.py).
-  2. Picks the slate: games whose ET gameday is today; if none, the next gameday with unplayed games.
+  2. Slate = games whose ET gameday is --date. If none: says so and names the next gameday
+     (or scores it with --next).
   3. Builds pre-game features exactly like Features.BuildRows: only games FINISHED on days before the
      slate feed the margin model, form, ATS and records. Slate games' scores are never read (they are
      stripped before anything else touches them).
@@ -25,7 +30,7 @@ What it does
      fires, else PASS with the model's lean. Odds shown are the nflverse posted lines at pull time
      (the backtest used closing lines, so prices may still move).
 
-Writes data/backtest/today/predictions_<first slate date>.json (readable JSON) and .md.
+Writes data/backtest/today/predictions_<date>[_week].json (readable JSON) and .md.
 """
 
 import argparse
@@ -92,25 +97,18 @@ def Done(g) -> bool:
     return g.get("home_score") is not None and g.get("away_score") is not None
 
 
-def PickSlate(games, date=None, week=False):
-    today = datetime.now(ET).date().isoformat()
-    if date:
-        day = date
-    else:
-        todays = [g for g in games if str(g["gameday"]) == today]
-        if todays:
-            day = today
-        else:
-            upcoming = sorted({str(g["gameday"]) for g in games if str(g["gameday"]) >= today and not Done(g)})
-            if not upcoming:
-                return today, None, []
-            day = upcoming[0]
-    slate = [g for g in games if str(g["gameday"]) == day]
+def NextGameday(games, date):
+    later = sorted({str(g["gameday"]) for g in games if str(g["gameday"]) > date and not Done(g)})
+    return later[0] if later else None
+
+
+def PickSlate(games, date, week=False):
+    slate = [g for g in games if str(g["gameday"]) == date]
     if week and slate:
         wk = slate[0]["week"]
-        slate = [g for g in games if g["week"] == wk and str(g["gameday"]) >= day]
+        slate = [g for g in games if g["week"] == wk and str(g["gameday"]) >= date]
     slate.sort(key=lambda g: (str(g["gameday"]), g.get("gametime") or "", g["game_id"]))
-    return today, day, slate
+    return slate
 
 
 # ----------------------------------------------------------------------------- leak-free features
@@ -223,7 +221,7 @@ def Ml(x):
 
 def Markdown(meta, preds):
     L = [f"# NFL picks: {meta['slate_label']}", "",
-         f"- Today (ET): {meta['today_et']} -- {meta['tonight_note']}",
+         f"- Date (ET): {meta['requested_date']} -- {meta['tonight_note']} (run {meta['generated_at_et']})",
          f"- Data: {meta['source']}, pulled {meta['pulled_at_et']}; ratings use {meta['finished_games_used']} finished games through {meta['last_finished_day']}.",
          f"- Models fit on {meta['model_train_seasons']} (walk-forward, as in the backtest). Lines are nflverse posted lines at pull time, not closing lines.", "",
          "| Game | Kickoff | Lines (away/home ML, home spread) | Records | always_home | market_fav | margin_model | model_edge_5% (v1) | value_edge8 (half Kelly) | div_add-on | **Recommended** | Why |",
@@ -239,49 +237,75 @@ def Markdown(meta, preds):
     return "\n".join(L) + "\n"
 
 
-def Main():
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--date", help="ET gameday YYYY-MM-DD (default: today, else next slate)")
-    ap.add_argument("--week", action="store_true", help="score every remaining game of that NFL week")
-    ap.add_argument("--season", type=int)
-    ap.add_argument("--no-refresh", action="store_true")
-    a = ap.parse_args()
+def SeasonOf(date):
+    y, m = int(date[:4]), int(date[5:7])
+    return y if m >= 3 else y - 1
+
+
+def PredictDay(date=None, week=False, refresh=True, season=None, next_slate=False, write=True):
+    """Score the NFL games on ET gameday `date` (YYYY-MM-DD; default today ET). Returns
+    {"meta", "games", "markdown"}; games is [] when nothing is scheduled that day."""
     now = datetime.now(ET)
-    season = a.season or (now.year if now.month >= 3 else now.year - 1)
-    sched = LoadSchedule(season, not a.no_refresh)
+    today = now.date().isoformat()
+    date = date or today
+    season = season or SeasonOf(date)
+    sched = LoadSchedule(season, refresh)
     games = sched["games"]
-    today, day, slate = PickSlate(games, a.date, a.week)
+    asked = date
+    slate = PickSlate(games, date, week)
+    nxt = NextGameday(games, date) if not slate else None
+    if not slate and next_slate and nxt:
+        date = nxt
+        slate = PickSlate(games, date, week)
+    pulled = sched.get("pulled_at_utc")
+    pulled_et = datetime.fromisoformat(pulled).astimezone(ET).strftime("%a %b %d %Y %I:%M %p ET") if pulled else "unknown"
     if not slate:
-        print(f"No unplayed NFL games found on/after {today} for season {season}.")
-        return
-    tonight = [g for g in games if str(g["gameday"]) == today]
-    note = (f"{len(tonight)} game(s) today" if tonight else f"no NFL game today; scoring the next slate ({day})")
+        msg = (f"No NFL games on {asked} (ET), season {season}. "
+               + (f"Next slate: {nxt} -> run with --date {nxt} (or add --next)." if nxt else "No later unplayed games."))
+        return {"meta": {"date": asked, "today_et": today, "note": msg, "next_gameday": nxt,
+                         "pulled_at_et": pulled_et}, "games": [], "markdown": msg}
+    note = (f"{len(slate)} game(s) on {asked}" if date == asked
+            else f"no NFL game on {asked}; scoring the next slate ({date})")
     prior = LoadSeason(season - 1)
     rows, last_day, n_hist = SlateRows(games, prior, slate)
     rbs = AllRows(2012, season - 1)
     rbs[season] = rows
     AttachModels(rbs)
     preds = ScoreRows(rows)
-    pulled = sched.get("pulled_at_utc")
-    pulled_et = datetime.fromisoformat(pulled).astimezone(ET).strftime("%a %b %d %Y %I:%M %p ET") if pulled else "unknown"
     days = sorted({p["gameday"] for p in preds})
-    meta = {"today_et": today, "tonight_note": note, "slate_label": f"week {slate[0]['week']}, {days[0]}" + (f" to {days[-1]}" if len(days) > 1 else ""),
+    meta = {"date": date, "requested_date": asked, "today_et": today, "tonight_note": note,
+            "slate_label": f"week {slate[0]['week']}, {days[0]}" + (f" to {days[-1]}" if len(days) > 1 else ""),
             "source": sched.get("source"), "pulled_at_utc": pulled, "pulled_at_et": pulled_et,
             "last_finished_day": last_day, "finished_games_used": n_hist,
             "model_train_seasons": f"2013-{season - 1}", "generated_at_et": now.strftime("%Y-%m-%d %H:%M ET")}
-    os.makedirs(TODAY_DIR, exist_ok=True)
-    stem = os.path.join(TODAY_DIR, f"predictions_{days[0]}{'_week' if a.week else ''}")
-    with open(stem + ".json", "w", encoding="utf-8") as fh:
-        json.dump({"meta": meta, "games": preds}, fh, indent=1)
     md = Markdown(meta, preds)
-    with open(stem + ".md", "w", encoding="utf-8") as fh:
-        fh.write(md)
-    print(md)
-    print(f"wrote {stem}.json and .md")
+    if write:
+        os.makedirs(TODAY_DIR, exist_ok=True)
+        stem = os.path.join(TODAY_DIR, f"predictions_{date}{'_week' if week else ''}")
+        with open(stem + ".json", "w", encoding="utf-8") as fh:
+            json.dump({"meta": meta, "games": preds}, fh, indent=1)
+        with open(stem + ".md", "w", encoding="utf-8") as fh:
+            fh.write(md)
+        meta["written"] = stem + ".json/.md"
+    return {"meta": meta, "games": preds, "markdown": md}
+
+
+def Main():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    ap = argparse.ArgumentParser(description="NFL picks for one ET gameday. Same-day = pass today's date.")
+    ap.add_argument("--date", default=datetime.now(ET).strftime("%Y-%m-%d"), help="ET gameday YYYY-MM-DD (default: today ET)")
+    ap.add_argument("--season", type=int, default=None, help="season start year (default from date)")
+    ap.add_argument("--week", action="store_true", help="also score the rest of that NFL week")
+    ap.add_argument("--next", action="store_true", help="if no games on --date, score the next gameday")
+    ap.add_argument("--no-refresh", action="store_true", help="use the last saved schedule, no download")
+    a = ap.parse_args()
+    out = PredictDay(a.date, a.week, not a.no_refresh, a.season, a.next)
+    print(out["markdown"])
+    if out["meta"].get("written"):
+        print(f"wrote {out['meta']['written']}")
 
 
 if __name__ == "__main__":
