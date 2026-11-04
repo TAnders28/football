@@ -30,7 +30,7 @@ What it does
      fires, else PASS with the model's lean. Odds shown are the nflverse posted lines at pull time
      (the backtest used closing lines, so prices may still move).
 
-Writes data/backtest/today/predictions_<date>[_week].json (readable JSON) and .md.
+Writes data/backtest/predictions/picks_<date>[_week].json (readable JSON) and .md, same layout as basketball.
 """
 
 import argparse
@@ -50,7 +50,8 @@ from Backtest.Model import MarginModel, SeasonAverageMargins
 from Backtest.Odds import FairProbs
 
 ET = ZoneInfo("America/New_York")
-TODAY_DIR = os.path.join("data", "backtest", "today")
+TODAY_DIR = os.path.join("data", "backtest", "today")          # schedule cache
+PRED_DIR = os.path.join("data", "backtest", "predictions")    # picks_<date>.json/.md, like basketball
 OUTCOME_KEYS = ("home_score", "away_score", "result", "total", "overtime")
 
 
@@ -148,6 +149,7 @@ def SlateRows(games, prior_games, slate):
             "div": float(g.get("div_game") or 0),
             "games_played": min(len(margins[h]), len(margins[a])),
             "home_record": Record(margins[h]), "away_record": Record(margins[a]),
+            "home_rest": g.get("home_rest"), "away_rest": g.get("away_rest"),
             "result": None, "home_win": None, "home_cover": None,
         })
     return rows, (hist[-1]["gameday"] if hist else None), len(hist)
@@ -188,17 +190,30 @@ def ScoreRows(rows):
         elif cv:
             c = cv[0]
             st = half(c, 1.0)
-            rec = {"action": "BET", "team": c["team"], "odds": c["odds"], "stake_pct": round(st * 100, 1),
+            rec = {"action": "BET", "team": c["team"], "odds": c["odds"], "stake_pct": round(st * 100, 1), "_p": c["p"], "rule": "value_full2_edge8",
                    "why": f"Sparse value fires: model {c['p']*100:.0f}% vs market {c['p_mkt']*100:.0f}% (+{c['edge']*100:.1f} pts >= 8); half Kelly {st*100:.1f}% of bank."}
         elif cd:
             c = cd[0]
-            rec = {"action": "BET", "team": c["team"], "odds": c["odds"], "stake_pct": 2.0,
+            rec = {"action": "BET", "team": c["team"], "odds": c["odds"], "stake_pct": 2.0, "_p": c["p"], "rule": "div_full3_edge2",
                    "why": f"Divisional add-on: full3 model {c['p']*100:.0f}% vs market {c['p_mkt']*100:.0f}% (+{c['edge']*100:.1f} pts); flat 2% of bank."}
         else:
             rec = {"action": "PASS", "team": Team(r, lean), "stake_pct": 0.0,
                    "why": f"No edge: best model edge {best_edge*100:+.1f} pts on {Team(r, edge_side)} (< 8 needed); lean {Team(r, lean)} {p_lean*100:.0f}% to win."}
+        side = "home" if rec["team"] == r["home_team"] else "away"
+        if rec["action"] == "BET":
+            prob = rec.pop("_p")
+        elif r["has_odds"]:
+            prob = r["p_full2"] if side == "home" else 1 - r["p_full2"]
+        else:
+            pm = 1 / (1 + math.exp(-r["margin_logit"]))
+            prob = pm if side == "home" else 1 - pm
+        against = [n for n in ("market_fav", "margin_model_fav") if s.get(n) not in (None, rec["team"])]
+        tier = "high" if prob >= 0.70 else "medium" if prob >= 0.60 else "low"
+        if against and tier != "low":
+            tier = "medium" if tier == "high" else "low"
+        rec.update({"prob": round(prob, 4), "confidence": tier, "disagrees": against})
         out.append({
-            "game_id": r["game_id"], "week": r["week"], "gameday": r["gameday"], "kickoff_et": r["gametime"],
+            "game_id": r["game_id"], "away_rest": r["away_rest"], "home_rest": r["home_rest"], "week": r["week"], "gameday": r["gameday"], "kickoff_et": r["gametime"],
             "matchup": f"{r['away_team']} @ {r['home_team']}", "records": f"{r['away_record']} @ {r['home_record']}",
             "away_ml": r["away_ml"], "home_ml": r["home_ml"], "spread_home": r["spread"], "divisional": bool(r["div"]),
             "market_home_prob": round(r["mkt_home"], 3) if r["has_odds"] else None,
@@ -210,9 +225,10 @@ def ScoreRows(rows):
 
 
 # ----------------------------------------------------------------------------- output
-def Kick(day, t):
+def Kick(day, t, with_day):
     d = datetime.fromisoformat(f"{day}T{t or '13:00'}")
-    return d.strftime("%a %b ") + str(d.day) + " " + d.strftime("%I:%M %p").lstrip("0") + " ET"
+    clock = d.strftime("%I:%M %p").lstrip("0").lower() + " ET"
+    return (d.strftime("%a ") + clock) if with_day else clock
 
 
 def Ml(x):
@@ -220,20 +236,26 @@ def Ml(x):
 
 
 def Markdown(meta, preds):
-    L = [f"# NFL picks: {meta['slate_label']}", "",
-         f"- Date (ET): {meta['requested_date']} -- {meta['tonight_note']} (run {meta['generated_at_et']})",
-         f"- Data: {meta['source']}, pulled {meta['pulled_at_et']}; ratings use {meta['finished_games_used']} finished games through {meta['last_finished_day']}.",
-         f"- Models fit on {meta['model_train_seasons']} (walk-forward, as in the backtest). Lines are nflverse posted lines at pull time, not closing lines.", "",
-         "| Game | Kickoff | Lines (away/home ML, home spread) | Records | always_home | market_fav | margin_model | model_edge_5% (v1) | value_edge8 (half Kelly) | div_add-on | **Recommended** | Why |",
-         "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    """Same shape as basketball's Backtest.PredictDay: one heading, one table, Pick / prob / Conf at the end.
+    NFL extras: posted line, the two money rules, and a Bet column (stake or '-')."""
+    days = sorted({p["gameday"] for p in preds})
+    span = days[0] + (f" to {days[-1]}" if len(days) > 1 else "")
+    L = [f"# NFL picks {span} (week {preds[0]['week']}; data through {meta['last_finished_day']}, {meta['finished_games_used']} games)", ""]
+    if meta["requested_date"] != meta["date"]:
+        L += [f"No NFL games on {meta['requested_date']}; showing the next slate.", ""]
+    L += ["| Kick ET | Game | Records | Rest (A/H) | Line (A/H, spread) | always_home | market_fav | margin_model | edge5_v1 | value8 | div_addon | Pick | Model prob | Conf | Bet |",
+          "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for p in preds:
         s, r = p["strategies"], p["recommended"]
         sp = "-" if p["spread_home"] is None else f"{p['spread_home']:+g}"
-        rec = f"**{r['action']} {r['team']}**" + (f" {Ml(r.get('odds'))} @ {r['stake_pct']:g}%" if r["action"] == "BET" else "")
-        L.append(f"| {p['matchup']}{' (div)' if p['divisional'] else ''} | {Kick(p['gameday'], p['kickoff_et'])} | {Ml(p['away_ml'])} / {Ml(p['home_ml'])}, {sp} | {p['records']} | "
-                 f"{s['always_home']} | {s['market_fav'] or '-'} | {s['margin_model_fav']} | {s['model_edge_5pct_v1'] or 'no bet'} | "
-                 f"{s['value_full2_edge8'] or 'no bet'} | {s['div_full3_edge2'] or 'no bet'} | {rec} | {r['why']} |")
-    L += ["", "Stakes are % of the current bankroll. BET = a rule that made money out-of-sample in 2023-25 fired; PASS = no backtested edge (lean shown for interest only)."]
+        rest = f"{p['away_rest'] if p['away_rest'] is not None else '-'}/{p['home_rest'] if p['home_rest'] is not None else '-'}"
+        bet = f"**{r['stake_pct']:g}% @ {Ml(r.get('odds'))}**" if r["action"] == "BET" else "-"
+        L.append(f"| {Kick(p['gameday'], p['kickoff_et'], len(days) > 1)} | {p['matchup']}{' (div)' if p['divisional'] else ''} | "
+                 f"{p['records'].replace(' @ ', ' / ')} | {rest} | {Ml(p['away_ml'])}/{Ml(p['home_ml'])}, {sp} | "
+                 f"{s['always_home']} | {s['market_fav'] or '-'} | {s['margin_model_fav']} | {s['model_edge_5pct_v1'] or '-'} | "
+                 f"{s['value_full2_edge8'] or '-'} | {s['div_full3_edge2'] or '-'} | **{r['team']}** | {r['prob'] * 100:.0f}% | {r['confidence']} | {bet} |")
+    L += ["", f"Lines: nflverse posted lines pulled {meta['pulled_at_et']} (backtest used closing lines; prices may move). "
+          "Bet = a rule that made money out-of-sample 2023-25 fired (value8: half Kelly, cap 10%; div_addon: flat 2% of bank); '-' = pass, Pick is the model lean."]
     return "\n".join(L) + "\n"
 
 
@@ -280,8 +302,8 @@ def PredictDay(date=None, week=False, refresh=True, season=None, next_slate=Fals
             "model_train_seasons": f"2013-{season - 1}", "generated_at_et": now.strftime("%Y-%m-%d %H:%M ET")}
     md = Markdown(meta, preds)
     if write:
-        os.makedirs(TODAY_DIR, exist_ok=True)
-        stem = os.path.join(TODAY_DIR, f"predictions_{date}{'_week' if week else ''}")
+        os.makedirs(PRED_DIR, exist_ok=True)
+        stem = os.path.join(PRED_DIR, f"picks_{date}{'_week' if week else ''}")
         with open(stem + ".json", "w", encoding="utf-8") as fh:
             json.dump({"meta": meta, "games": preds}, fh, indent=1)
         with open(stem + ".md", "w", encoding="utf-8") as fh:
