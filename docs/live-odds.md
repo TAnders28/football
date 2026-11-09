@@ -97,7 +97,7 @@ The text includes overtime in the full game, pays $0.50 / $0.50 on a tie when
 no Tie strike is listed, and pays a last fair price on several postponement,
 cancellation, forfeit, and abandonment paths. The product certification is
 `https://assets.kalshi.com/regulatory/product-certifications/FOOTBALLGAMEWIN.pdf`.
-Because a last fair price is not a fixed payoff, `closed_form` stays false.
+Because a last fair price, a $0.50 tie, or a 50-50 cancellation is not a 0/1 payoff, the parser leaves `closed_form` false. A caller can still pass an explicit closed-form settlement in a test. A last trade that sits outside that token's own bid and ask is noted and is not used as the ask.
 Polymarket moneyline text returned on the Gamma market (overtime included, tie
 50-50, cancellation 50-50) is quoted the same way and is also not closed-form.
 Neither text is turned into a live probability.

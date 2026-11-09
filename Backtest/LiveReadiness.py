@@ -273,15 +273,25 @@ def _without_times(row, extra):
     return out
 
 
-def _excerpt(text, needle, span=220):
+def _excerpt(text, needle, span=320):
+    """Quote the sentence that contains needle. Do not start mid-word."""
     if not text:
         return None
-    idx = text.lower().find(needle.lower())
+    lower = text.lower()
+    idx = lower.find(needle.lower())
     if idx < 0:
         return None
-    start = max(0, idx - 40)
-    clip = " ".join(text[start:idx + span].split())
-    return clip
+    start = max(text.rfind(". ", 0, idx), text.rfind("? ", 0, idx), text.rfind("! ", 0, idx))
+    start = 0 if start < 0 else start + 2
+    end = len(text)
+    for mark in (". ", "? ", "! "):
+        found = text.find(mark, idx)
+        if found >= 0:
+            end = min(end, found + 1)
+    clip = " ".join(text[start:end].split())
+    if len(clip) > span:
+        clip = clip[:span].rsplit(" ", 1)[0]
+    return clip or None
 
 
 def SettlementFromRules(text):
@@ -301,13 +311,15 @@ def SettlementFromRules(text):
     cancel = None
     for needle in ("postponed", "cancelled", "canceled", "abandoned", "forfeit", "fair price", "fair market"):
         cancel = cancel or _excerpt(raw, needle)
-    discretionary = any(phrase in raw.lower() for phrase in ("fair price", "fair market", "sole discretion"))
+    discretionary = any(phrase in raw.lower() for phrase in ("fair price", "fair market", "sole discretion", "50-50", "50/50"))
     yes_payoff, tie_payoff, no_payoff = None, None, None
     lower = raw.lower()
-    if "overtime" in lower and ("$0.50" in raw or "0.50" in raw):
+    if "overtime" in lower and ("$0.50" in raw or "0.50" in raw or "50-50" in lower or "50/50" in lower):
         yes_payoff, tie_payoff, no_payoff = 1.0, 0.5, 0.0
     status = "known" if overtime and tie and cancel else "partial"
-    closed = bool(status == "known" and not discretionary and tie_payoff is not None)
+    # A tie at 0.50, a 50-50 cancellation, or a last-fair-price path is not a
+    # 0/1 payoff. closed_form stays false so EV cannot treat it as one.
+    closed = False
     return {
         "status": status,
         "closed_form": closed,
@@ -383,6 +395,9 @@ def _quote_problems(quote, now, limits, phase):
         notes.append("summary_disagrees_with_book")
     if ask and summary_ask is not None and abs(ask["price"] - summary_ask) > 0.001:
         notes.append("summary_disagrees_with_book")
+    last_trade = AsFloat(quote.get("last_trade"))
+    if last_trade is not None and bid and ask and (last_trade < bid["price"] - 0.02 or last_trade > ask["price"] + 0.02):
+        notes.append("last_trade_outside_book")
     executable = market == "open" and ask is not None and ask.get("size") is not None and ask["size"] > 0 and "wrong_outcome" not in reasons
     if market == "open" and not executable and "wrong_outcome" not in reasons and "no_depth" not in reasons:
         if ask is None or not ask.get("size"):

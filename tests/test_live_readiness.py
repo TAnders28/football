@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from Backtest.AssessLive import FetchError, _kalshi_quote
-from Backtest.LiveReadiness import AssessGame, BookSide, PREGAME_MODEL_NOTE
+from Backtest.LiveReadiness import AssessGame, BookSide, PREGAME_MODEL_NOTE, SettlementFromRules
 from Backtest.PredictDay import SeasonOf
 
 
@@ -248,6 +248,33 @@ class ReadinessTests(unittest.TestCase):
         )), NOW)
         self.assertNotIn("state_stale_timestamp", fresh["fail_reasons"])
         self.assertTrue(fresh["states"][0]["usable"])
+
+    def test_cancellation_and_tie_paths_are_not_closed_form(self):
+        text = (
+            "All overtime periods are included in the winner. "
+            "If no Tie strike is listed, Yes holders are paid $0.50 and No holders are paid $0.50. "
+            "If the game is cancelled, the market resolves at the last fair price."
+        )
+        parsed = SettlementFromRules(text)
+        self.assertEqual(parsed["status"], "known")
+        self.assertFalse(parsed["closed_form"])
+        self.assertEqual(parsed["tie_payoff"], 0.5)
+        self.assertTrue(parsed["overtime"].startswith("All overtime"))
+        self.assertIn("last fair price", parsed["cancellation"])
+        fifty = SettlementFromRules(
+            "Overtime is included if played. If the game ends in a tie, this market will resolve 50-50. "
+            "If the game is canceled entirely, this market will resolve 50-50."
+        )
+        self.assertFalse(fifty["closed_form"])
+        self.assertEqual(fifty["tie_payoff"], 0.5)
+
+    def test_last_trade_outside_the_book_is_not_the_ask(self):
+        out = AssessGame(_game(quote=_quote(last_trade=0.13)), NOW)
+        quote = out["quotes"][0]
+        self.assertIn("last_trade_outside_book", quote["notes"])
+        self.assertEqual(quote["ask"]["price"], 0.86)
+        self.assertIsNone(quote["gross_ev"])
+        self.assertIsNone(out["probability"])
 
     def test_provider_delay_flag_fails_closed(self):
         out = AssessGame(_game(state=_state(delayed=True)), NOW)
