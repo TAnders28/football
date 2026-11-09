@@ -4,3 +4,4 @@ polars
 pyarrow
 pandas
 requests
+pypdf
