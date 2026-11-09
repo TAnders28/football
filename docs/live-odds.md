@@ -62,9 +62,12 @@ Source timestamps and the local observed time are stored separately. UTC is
 stored; America/New_York is displayed. A successful HTTP call does not make an
 old source timestamp current.
 
-Tool policy (not a provider guarantee): a live quote or board older than 45
-seconds is stale, a timestamp more than 90 seconds ahead of the local clock is
-rejected, and quote vs accepted state skew above 20 seconds fails closed.
+Tool policy (not a provider guarantee): a quote or board source time older
+than 45 seconds is stale, including a finished game whose provider timestamp
+is hours before the retrieval. Pregame source times may be up to 15 minutes
+old. A timestamp more than 90 seconds ahead of the local clock is rejected,
+and quote vs accepted state skew above 20 seconds fails closed. Retrieval time
+is stored as `observed_at` and is never copied into `source_timestamp`.
 Kalshi documents that live data may be a cached board and that
 `live_data_delayed` is set only once a feed is significantly stale, so a missing
 flag is not treated as proof of freshness. Kalshi market `updated_time` is the
@@ -75,9 +78,45 @@ as the score's sample time.
 
 ## Fees
 
-Kalshi `fee_type` / `fee_multiplier` come from `GET /series`. Docs point the
-quadratic schedules at `https://kalshi.com/docs/kalshi-fee-schedule.pdf`. If that
-PDF is not retrieved, or its prose is not reduced to a per-contract dollar
-amount, the fee is **unknown**. Polymarket `mbf` / `tbf` / `fd` are recorded and
-the dollar fee stays unknown unless a formula is actually in the payload. Unknown
-fees blank EV.
+Kalshi `fee_type` / `fee_multiplier` come from `GET /series`. The series schema
+maps `quadratic_with_maker_fees` to the General Trading Fees table plus the
+Maker Fees section of `https://kalshi.com/docs/kalshi-fee-schedule.pdf`
+(`https://docs.kalshi.com/api-reference/market/get-series`). That PDF returned
+HTTP 429 on the 2026-11-08 8:57 PM ET run and is not retried. The numeric rate
+and rounding unit were not read from it, so `taker_fee_per_contract` stays null.
+Polymarket `GET /clob-markets/{condition_id}` returns `mbf`, `tbf`, and `fd`
+(`https://docs.polymarket.com/api-reference/markets/get-clob-market-info`).
+Those fields do not state a dollar function of price and size, so that fee is
+unknown too. Unknown fees blank EV. No coefficient is hard-coded in their place.
+
+## Settlement
+
+Kalshi football game-winner terms were read from the series
+`contract_terms_url`, `https://assets.kalshi.com/contract_terms/FOOTBALLGAMEWIN.pdf`.
+The text includes overtime in the full game, pays $0.50 / $0.50 on a tie when
+no Tie strike is listed, and pays a last fair price on several postponement,
+cancellation, forfeit, and abandonment paths. The product certification is
+`https://assets.kalshi.com/regulatory/product-certifications/FOOTBALLGAMEWIN.pdf`.
+Because a last fair price is not a fixed payoff, `closed_form` stays false.
+Polymarket moneyline text returned on the Gamma market (overtime included, tie
+50-50, cancellation 50-50) is quoted the same way and is also not closed-form.
+Neither text is turned into a live probability.
+
+## What has no in-play validation
+
+`MarginModel` uses only finished games and a season-to-date margin. `Features`
+builds rows with a day barrier. `Lab` fits `p_margin`, `p_full2`, and `p_full3`
+on earlier seasons against final `home_win` and the de-vigged closing moneyline
+(`mkt_logit`, form, ATS, rest, divisional). `PlayByPlay.ReconstructGame` reshapes
+nflverse play-by-play for reading. None of these is a model of the current
+period, clock, and score against an executable venue ask, and none was checked
+on historical in-play venue prices.
+
+The missing historical set is all three of these, joined on one contract:
+
+- in-play state (period, clock, score, and the status the venue actually settled)
+- that contract's executable bid and ask, with the venue's source timestamp
+- the settlement outcome under that contract's overtime, tie, and cancellation rules
+
+nflverse schedules and closing moneylines are not that set. Until it exists,
+`AssessLive` has no validated in-play probability and does not emit a pick.

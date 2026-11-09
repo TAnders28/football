@@ -336,16 +336,10 @@ def _state_problems(state, now, limits):
     phase = PhaseOf(state.get("status"), state.get("live"), state.get("ended"))
     if phase == "unknown":
         reasons.append("game_status_unknown")
-    max_age = limits["max_live_age_s"] if phase == "live" else limits["max_pregame_age_s"]
-    if phase == "final":
-        age_reasons, age = ([], None)
-        if state.get("source_timestamp") is None:
-            age_reasons, age = ["missing_timestamp"], None
-        else:
-            age_reasons, age = ClassifyAge(state.get("source_timestamp"), now, 24 * 3600, limits["max_future_s"])
-            age_reasons = [r for r in age_reasons if r == "future_timestamp"]
-    else:
-        age_reasons, age = ClassifyAge(state.get("source_timestamp"), now, max_age, limits["max_future_s"])
+    # A finished score is still shown. It is a synchronized board only when its
+    # own source time is recent. The retrieval clock is not that source time.
+    max_age = limits["max_pregame_age_s"] if phase == "pregame" else limits["max_live_age_s"]
+    age_reasons, age = ClassifyAge(state.get("source_timestamp"), now, max_age, limits["max_future_s"])
     if state.get("delayed") is True:
         age_reasons = sorted(set(age_reasons + ["provider_marked_delayed"]))
     reasons.extend(f"state_{r}" if not r.startswith("state_") else r for r in age_reasons)
@@ -375,12 +369,8 @@ def _quote_problems(quote, now, limits, phase):
         reasons.append("closed")
     elif market != "open":
         reasons.append("market_status_unknown")
-    max_age = limits["max_live_age_s"] if phase == "live" else limits["max_pregame_age_s"]
-    if phase == "final":
-        age_reasons, age = ClassifyAge(quote.get("source_timestamp"), now, 24 * 3600, limits["max_future_s"])
-        age_reasons = [r for r in age_reasons if r != "stale_timestamp"]
-    else:
-        age_reasons, age = ClassifyAge(quote.get("source_timestamp"), now, max_age, limits["max_future_s"])
+    max_age = limits["max_pregame_age_s"] if phase == "pregame" else limits["max_live_age_s"]
+    age_reasons, age = ClassifyAge(quote.get("source_timestamp"), now, max_age, limits["max_future_s"])
     reasons.extend(f"quote_{r}" for r in age_reasons)
     book = quote.get("book") or {}
     bid = (book.get("bids") or {}).get("best")

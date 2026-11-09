@@ -226,6 +226,29 @@ class ReadinessTests(unittest.TestCase):
         self.assertIsNone(out["quotes"][0]["gross_ev"])
         self.assertIsNone(out["quotes"][0]["net_ev"])
 
+    def test_old_final_source_time_is_not_made_current_by_retrieval(self):
+        old = NOW - timedelta(hours=5)
+        out = AssessGame(_game(state=_state(
+            status="closed", period=4, clock="00:00", away_score=34, home_score=17,
+            source_timestamp=old, observed_at=NOW,
+        ), quote=_quote(source_timestamp=old, observed_at=NOW)), NOW)
+        state = out["states"][0]
+        self.assertIn("state_stale_timestamp", out["fail_reasons"])
+        self.assertFalse(state["usable"])
+        self.assertIsNone(out["sync"]["accepted_state_source"])
+        self.assertEqual(state["source_timestamp"], "2026-11-08T20:45:00.000Z")
+        self.assertEqual(state["observed_at_utc"], "2026-11-09T01:45:00.000Z")
+        self.assertNotEqual(state["source_timestamp"], state["observed_at_utc"])
+        self.assertIsNone(out["probability"])
+        self.assertIsNone(out["quotes"][0]["gross_ev"])
+
+        fresh = AssessGame(_game(state=_state(
+            status="closed", period=4, clock="00:00", away_score=34, home_score=17,
+            source_timestamp=NOW - timedelta(seconds=10), observed_at=NOW,
+        )), NOW)
+        self.assertNotIn("state_stale_timestamp", fresh["fail_reasons"])
+        self.assertTrue(fresh["states"][0]["usable"])
+
     def test_provider_delay_flag_fails_closed(self):
         out = AssessGame(_game(state=_state(delayed=True)), NOW)
         self.assertIn("state_provider_marked_delayed", out["fail_reasons"])
