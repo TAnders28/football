@@ -249,6 +249,25 @@ class ReadinessTests(unittest.TestCase):
         self.assertNotIn("state_stale_timestamp", fresh["fail_reasons"])
         self.assertTrue(fresh["states"][0]["usable"])
 
+    def test_finished_game_with_two_stale_boards_shows_final_not_unknown(self):
+        old = NOW - timedelta(hours=5)
+        out = AssessGame(_game(states=[
+            _state(status="closed", period=4, clock="00:00", away_score=34, home_score=17, source_timestamp=old),
+            _state(venue="polymarket", status="ended", ended=True, period="VFT", clock=None,
+                   away_score=34, home_score=17, source_timestamp=None),
+        ], quote=_quote(source_timestamp=old)), NOW)
+        self.assertEqual(out["phase"], "final")
+        self.assertEqual(out["action"], "PASS")
+        self.assertIsNone(out["sync"]["accepted_state_source"])
+        self.assertIn("state_stale_timestamp", out["fail_reasons"])
+        split = AssessGame(_game(states=[
+            _state(status="inprogress", source_timestamp=old),
+            _state(venue="polymarket", status="ended", ended=True, period="VFT", source_timestamp=None),
+        ]), NOW)
+        self.assertEqual(split["phase"], "unknown")
+        winner_only = AssessGame(_game(state=_state(status="postgame_new_word", winner="CHI", source_timestamp=old)), NOW)
+        self.assertEqual(winner_only["phase"], "final")
+
     def test_cancellation_and_tie_paths_are_not_closed_form(self):
         text = (
             "All overtime periods are included in the winner. "

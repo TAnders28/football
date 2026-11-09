@@ -9,6 +9,12 @@ Writes data/backtest/live/assess_<date>_<utc>.json and .md. Those paths are
 gitignored with the rest of data/. Nothing here places an order, stores a
 credential, or refreshes itself on a timer.
 
+Also appends the shared live file for Degen (Backtest.LiveFile):
+    <live-dir>/<date>_live/<date>_live.jsonl        one row per market per run (append-only)
+    <live-dir>/<date>_live/<date>_live_latest.md    overwritten each run
+    --live-dir defaults to E:\\AgentDocs\\American-Footbot; --no-live-file skips it.
+Every output carries model_version and run_id (Backtest.Version).
+
 Public reads used, all from the provider's own docs (no auth):
 
   Kalshi Trade API  https://external-api.kalshi.com/trade-api/v2
@@ -42,6 +48,8 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
+from Backtest.LiveFile import LIVE_ROOT, WriteLiveFile
+from Backtest.Version import ModelVersion, NewRunId
 from Backtest.LiveReadiness import (
     ET, AsFloat, BookSide, Canon, EmptyReport, EtText, Iso, ParseTime, PREGAME_MODEL_NOTE,
     SettlementFromRules, AssessGame, Thresholds,
@@ -707,7 +715,8 @@ def Markdown(meta, games):
         "Probability and EV stay blank unless a validated game-state model, an executable ask, "
         "a known fee, and a closed-form settlement are all present. This repository has no such model.",
         "",
-        f"Generated {meta.get('generated_at_et')} ({meta.get('generated_at_utc')}).",
+        f"Generated {meta.get('generated_at_et')} ({meta.get('generated_at_utc')}). "
+        f"run_id `{meta.get('run_id')}`, model_version `{meta.get('model_version')}`.",
         "",
         "| Game | Phase | Score | Clock | Venue quote | Freshness | Action | Prob | EV |",
         "|---|---|---|---|---|---|---|---|---|",
@@ -824,7 +833,7 @@ def Markdown(meta, games):
     return "\n".join(lines)
 
 
-def AssessLive(date=None, matchup=None, write=True, fetcher=None, now=None):
+def AssessLive(date=None, matchup=None, write=True, fetcher=None, now=None, live_dir=None, live_file=True):
     supplied_now = now is not None
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
@@ -846,6 +855,9 @@ def AssessLive(date=None, matchup=None, write=True, fetcher=None, now=None):
     assessed = MergeAndAssess(games, assessed_at) if games else []
     report = EmptyReport(assessed_at, date, errors)
     report["meta"]["notes"] = notes
+    report["meta"]["run_id"] = NewRunId(assessed_at)
+    report["meta"]["model_version"] = ModelVersion()
+    report["meta"]["live_model"] = None
     report["meta"]["http_calls"] = getattr(fetcher, "calls", None)
     report["meta"]["thresholds_seconds"] = Thresholds()
     report["meta"]["validated"] = {
@@ -866,6 +878,9 @@ def AssessLive(date=None, matchup=None, write=True, fetcher=None, now=None):
         with open(stem + ".md", "w", encoding="utf-8") as fh:
             fh.write(report["markdown"])
         report["meta"]["written"] = stem + ".json/.md"
+        if live_file:
+            report["meta"]["live_file"] = WriteLiveFile(report, live_dir or LIVE_ROOT,
+                                                        report["meta"]["run_id"], report["meta"]["model_version"])
     return report
 
 
@@ -873,11 +888,16 @@ def Main():
     parser = argparse.ArgumentParser(description="One-shot read-only NFL live quote and game-state report. No orders.")
     parser.add_argument("--date", default=None, help="ET date YYYY-MM-DD (default: today ET)")
     parser.add_argument("--matchup", default=None, help="Optional away@home filter, e.g. TB@CHI")
+    parser.add_argument("--live-dir", default=None, help=f"root for <date>_live/ (default {LIVE_ROOT})")
+    parser.add_argument("--no-live-file", action="store_true", help="do not append the shared live file")
     args = parser.parse_args()
-    report = AssessLive(args.date, args.matchup)
+    report = AssessLive(args.date, args.matchup, live_dir=args.live_dir, live_file=not args.no_live_file)
     print(report["markdown"])
     if report["meta"].get("written"):
         print(f"wrote {report['meta']['written']}")
+    if report["meta"].get("live_file"):
+        lf = report["meta"]["live_file"]
+        print(f"live file: {lf['rows']} row(s) appended to {lf['jsonl']}; latest {lf['latest']}")
 
 
 if __name__ == "__main__":

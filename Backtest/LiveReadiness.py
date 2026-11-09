@@ -346,6 +346,8 @@ def _clock_required(phase, period):
 def _state_problems(state, now, limits):
     reasons = []
     phase = PhaseOf(state.get("status"), state.get("live"), state.get("ended"))
+    if phase == "unknown" and state.get("winner"):
+        phase = "final"   # the board names a winner: the game is over even if the status word is new to us
     if phase == "unknown":
         reasons.append("game_status_unknown")
     # A finished score is still shown. It is a synchronized board only when its
@@ -449,6 +451,17 @@ def _ev(applied, ask, fee, settlement):
     return round(gross, 6), round(net, 6), []
 
 
+def BoardPhase(prepared_states):
+    """Phase shown when no board is synchronized (e.g. every source time is stale).
+
+    Staleness decides whether a board is usable, not what phase it reports. If every board that
+    names a phase names the same one, show it: a finished game with an old source time is still
+    "final" (and still PASS). Boards that name different phases stay "unknown".
+    """
+    known = {s["phase"] for s in prepared_states if s.get("phase") not in (None, "unknown")}
+    return known.pop() if len(known) == 1 else "unknown"
+
+
 def AssessGame(game, now, model=None, thresholds=None):
     """Assess one matched game. `game` carries normalized quotes, states, fees, settlement.
 
@@ -490,7 +503,7 @@ def AssessGame(game, now, model=None, thresholds=None):
             accepted = max(usable, key=lambda s: s.get("source_timestamp") or "")
     if states and not usable and not any(s["fail_reasons"] for s in prepared_states):
         reasons.append("missing_game_state")
-    phase = accepted["phase"] if accepted else (prepared_states[0]["phase"] if len(prepared_states) == 1 else "unknown")
+    phase = accepted["phase"] if accepted else BoardPhase(prepared_states)
     if not accepted and prepared_states and "state_mismatch" not in reasons:
         reasons.append("no_synchronized_state")
 

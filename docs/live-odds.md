@@ -120,3 +120,21 @@ The missing historical set is all three of these, joined on one contract:
 
 nflverse schedules and closing moneylines are not that set. Until it exists,
 `AssessLive` has no validated in-play probability and does not emit a pick.
+
+## Shared live file (for Degen)
+
+Each `AssessLive` run (unless `--no-live-file`) appends one row per market to
+`<live-dir>/<date>_live/<date>_live.jsonl` and overwrites `<date>_live_latest.md`
+(`--live-dir` defaults to `E:\AgentDocs\American-Footbot`, or `FOOTBOT_LIVE_DIR`). Fields:
+`observed_at, game_id, teams, score, period, clock, state_time, venue, market, side, bid, ask, size,
+price_time, model_prob, edge, action, reason, fee_basis, quote_qualified` plus `phase`, `stale_detail`,
+`fail_reasons`, `run_id`, `model_version`.
+
+- `price_time` / `state_time` are source timestamps shown in ET; missing = stale.
+- `reason` is `stale` when either time is missing/stale, they are > 60 s apart, or the stricter limits
+  above fail (none are loosened). `final` for finished games. `no live model` otherwise — this repo
+  has no validated in-play model, so every row is PASS.
+- `quote_qualified` is true only for an executable bid and ask on a fresh, synchronized board.
+- `edge`, if a validated in-play probability is ever supplied, is `model_prob - ask - 0.02`
+  (`fee_basis = tim_estimate_0.02_per_contract`, Tim's estimate, not a verified fee).
+- A finished game whose boards are all stale now reports phase `final` (still PASS) instead of `unknown`.
