@@ -89,8 +89,9 @@ class MillionTargetTests(unittest.TestCase):
         self.assertTrue(np.array_equal(MT.CommonIndex(50, 20, 100), MT.CommonIndex(50, 20, 100)))
 
     def test_frontier_is_nondominated(self):
-        rows = [{"name": "a", "p_hit": 0.1, "p_ruin": 0.5}, {"name": "b", "p_hit": 0.05, "p_ruin": 0.1},
-                {"name": "c", "p_hit": 0.04, "p_ruin": 0.2}, {"name": "d", "p_hit": 0.1, "p_ruin": 0.6}]
+        k = "p_hit_before_ruin"
+        rows = [{"name": "a", k: 0.1, "p_ruin": 0.5}, {"name": "b", k: 0.05, "p_ruin": 0.1},
+                {"name": "c", k: 0.04, "p_ruin": 0.2}, {"name": "d", k: 0.1, "p_ruin": 0.6}]
         self.assertEqual(sorted(MT.Frontier(rows)), ["a", "b"])
 
     def test_nested_choice_ignores_the_season_played(self):
@@ -101,6 +102,38 @@ class MillionTargetTests(unittest.TestCase):
                       EVAL, 2013, "closing_ml", grid=grid, n_sims=200, T=None)
         self.assertEqual(a["choices"][1]["choice"], b["choices"][1]["choice"])
         self.assertEqual(a["choices"][1]["train"], [2013, 2015])
+
+    def test_ruin_is_absorbing_first_passage_and_ever_hit_is_kept_separately(self):
+        # 10k -> 500 (ruin) -> 10x days -> 5M: recovery after ruin counts only as ever-hit
+        days = [Day([0], [-0.95]), Day([0], [9.0]), Day([0], [9.0]), Day([0], [9.0]), Day([0], [9.0])]
+        pack = MT.Pack(days)
+        cfg = MT.Cfg("flat100", "flat", "flat", 1.0)
+        idx = np.arange(5)[None, :]
+        first = MT.Simulate(pack, idx, cfg)
+        ever = MT.Simulate(pack, idx, cfg, absorb_ruin=False)
+        self.assertTrue(first["ruin"][0])
+        self.assertFalse(first["hit"][0])
+        self.assertAlmostEqual(float(first["end"][0]), 500.0)          # cash held at the ruin level
+        self.assertTrue(ever["ruin"][0] and ever["hit"][0])
+        self.assertEqual(int(ever["hit_step"][0]), 4)
+        st = MT.BootStats(first, 1, ever)
+        self.assertEqual((st["p_hit_before_ruin"], st["p_ruin"], st["p_hit_ever"], st["p_ruin_then_hit"]), (0.0, 1.0, 1.0, 1.0))
+
+    def test_bootstrap_hit_and_ruin_are_mutually_exclusive_and_ever_is_a_superset(self):
+        rng = np.random.default_rng(3)
+        days = [Day(list(rng.uniform(0, 0.3, 3)), list(rng.choice([-1.0, 1.2], 3))) for _ in range(30)]
+        pack = MT.Pack(days)
+        idx = MT.CommonIndex(30, 120, 2000)
+        cfg = MT.Cfg("k4", "over_kelly", "kelly", 4.0)
+        first = MT.Simulate(pack, idx, cfg)
+        ever = MT.Simulate(pack, idx, cfg, absorb_ruin=False)
+        self.assertFalse((first["hit"] & first["ruin"]).any())
+        self.assertTrue(np.array_equal(first["ruin"], ever["ruin"]))        # ruin-before-hit is the same event
+        self.assertTrue(np.array_equal(first["hit"], ever["hit"] & ~ever["ruin"]))
+        self.assertTrue(first["ruin"].any() and first["hit"].any())
+        st = MT.BootStats(first, 2000, ever)
+        self.assertAlmostEqual(st["p_hit_before_ruin"] + st["p_ruin"] + st["p_neither"], 1.0, places=3)
+        self.assertAlmostEqual(st["p_hit_ever"] - st["p_hit_before_ruin"], st["p_ruin_then_hit"], places=3)
 
     def test_grid_is_finite_and_small(self):
         self.assertLessEqual(len(MT.GRID), 150)

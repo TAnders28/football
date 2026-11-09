@@ -24,9 +24,14 @@ Cash / settlement mechanics (also audited against Backtest.Compound by AuditComp
     $100k+ on one NFL moneyline are assumed fillable at the closing price. They might not be.
 
 Target and ruin
-  * HIT = bank >= $1,000,000 at the end of any day. Stop-at-target policy: after the first hit all cash is held
-    (no more bets). A separate "play-on" run keeps betting and reports terminal >= $1M.
-  * RUIN = bank <= $1,000 at any day end before a hit. ZERO = bank < $1 (true exhaustion).
+  * PRIMARY (first passage, both barriers absorbing): a path stops betting and holds cash at the FIRST day end
+    with bank >= $1,000,000 (HIT) or bank <= $1,000 (RUIN), whichever comes first. HIT-before-ruin and RUIN are
+    mutually exclusive. p_hit_before_ruin + p_ruin + p_neither = 1. Ending-bank quantiles use these absorbed paths.
+  * SECONDARY, kept for transparency: p_hit_ever = ever reaching $1M with recovery allowed after a fall to <= $1k
+    (ruin NOT absorbing, target still absorbing). p_ruin_then_hit = p_hit_ever - p_hit_before_ruin.
+    (Study run 20261109T125827-ebf63a reported p_hit_ever under the name p_hit.)
+  * A separate "play-on" run (neither barrier absorbing) reports terminal >= $1M.
+  * ZERO = bank < $1 (true exhaustion; under absorbing ruin this can only happen on the ruin day itself).
 
 Bootstrap: resample whole game DAYS (all of a day's bets together, keeping same-slate dependence) with
 replacement, T = number of days in the evaluation window, N_SIMS paths, one common index matrix per pool
@@ -34,7 +39,7 @@ replacement, T = number of days in the evaluation window, N_SIMS paths, one comm
 they can't create an edge the sample doesn't have, and they inherit its selection bias.
 
 Nested comparator: before each season S, every GRID config is bootstrapped on the days of TRAIN_FROM..S-1 with
-the same horizon T; the highest P(hit) wins (ties -> higher median ending bank) and is played on season S only,
+the same horizon T; the highest first-passage P(hit before ruin) wins (ties -> higher median ending bank) and is played on season S only,
 continuing the real bank. The bet-selection families were themselves searched on 2023-25, so even this is not
 untouched data.
 """
@@ -144,8 +149,10 @@ def Fractions(cfg, bank, t, T, K, M, TIER):
     return f
 
 
-def Simulate(pack, idx, cfg, stop=True, start=START, T=None, t0=0, record=False):
-    """idx: (paths, steps) day indices into pack. Returns per-path outcomes (and the path if record)."""
+def Simulate(pack, idx, cfg, stop=True, start=START, T=None, t0=0, record=False, absorb_ruin=True):
+    """idx: (paths, steps) day indices into pack. Returns per-path outcomes (and the path if record).
+    stop: target absorbing (hold cash after first hit). absorb_ruin: ruin absorbing (hold cash after first
+    bank <= RUIN); then hit and ruin are mutually exclusive first-passage events."""
     paths, steps = idx.shape
     T = T or steps
     bank = np.full(paths, float(start))
@@ -162,13 +169,14 @@ def Simulate(pack, idx, cfg, stop=True, start=START, T=None, t0=0, record=False)
         d = idx[:, j]
         K, R, M, TIER = pack["K"][d], pack["R"][d], pack["M"][d], pack["TIER"][d]
         f = Fractions(cfg, bank, t0 + j, T, K, M, TIER)
-        live = ~zero & ~(hit & stop)
+        live = ~zero & ~(hit & stop) & ~(ruin & absorb_ruin)
         f = f * live[:, None]
         staked_max = np.maximum(staked_max, f.sum(axis=1))
         bank = np.maximum(bank * (1.0 + (f * R).sum(axis=1)), 0.0)
-        new_hit = (bank >= TARGET) & ~hit
+        can_hit = ~hit & ~(ruin & absorb_ruin)
+        new_hit = (bank >= TARGET) & can_hit
         hit_step = np.where(new_hit, j, hit_step)
-        hit |= bank >= TARGET
+        hit |= new_hit
         ruin |= (bank <= RUIN) & ~hit
         zero |= bank < ZERO
         peak = np.maximum(peak, bank)
@@ -187,20 +195,34 @@ def CommonIndex(n_days, steps, n_sims=N_SIMS, seed=SEED):
     return np.random.default_rng(seed).integers(0, n_days, size=(n_sims, steps))
 
 
-def BootStats(res, n):
+def BootStats(res, n, ever=None):
+    """res: first-passage run (absorb_ruin=True). ever: same seeds with ruin not absorbing (recovery allowed).
+    MC SE is the binomial standard error in probability units (x100 = percentage points), 1 SE ~ 68%;
+    the 95% interval is +-1.96 SE (normal approx). It covers simulation noise only, not sample uncertainty."""
     e = res["end"]
+    assert not (res["hit"] & res["ruin"]).any()
     p = float(res["hit"].mean())
-    return {"p_hit": round(p, 4), "p_hit_mc_se": round(float(np.sqrt(p * (1 - p) / n)), 4),
-            "p_ruin": round(float(res["ruin"].mean()), 4), "p_zero": round(float(res["zero"].mean()), 4),
-            "p_ruin_then_hit": round(float((res["ruin"] & res["hit"]).mean()), 4),
-            "median_end": round(float(np.median(e)), 2), "p5_end": round(float(np.percentile(e, 5)), 2),
-            "p25_end": round(float(np.percentile(e, 25)), 2), "p75_end": round(float(np.percentile(e, 75)), 2),
-            "p95_end": round(float(np.percentile(e, 95)), 2), "p_below_start": round(float((e < START).mean()), 4),
-            "median_max_dd": round(float(-np.median(res["maxdd"])), 4)}
+    se = float(np.sqrt(p * (1 - p) / n))
+    out = {"p_hit_before_ruin": round(p, 4), "p_hit_before_ruin_mc_se": round(se, 4),
+           "p_hit_before_ruin_mc95": [round(max(0.0, p - 1.96 * se), 4), round(min(1.0, p + 1.96 * se), 4)],
+           "p_ruin": round(float(res["ruin"].mean()), 4), "p_zero": round(float(res["zero"].mean()), 4),
+           "p_neither": round(float((~res["hit"] & ~res["ruin"]).mean()), 4),
+           "median_end": round(float(np.median(e)), 2), "p5_end": round(float(np.percentile(e, 5)), 2),
+           "p25_end": round(float(np.percentile(e, 25)), 2), "p75_end": round(float(np.percentile(e, 75)), 2),
+           "p95_end": round(float(np.percentile(e, 95)), 2), "p_below_start": round(float((e < START).mean()), 4),
+           "median_max_dd": round(float(-np.median(res["maxdd"])), 4)}
+    if ever is not None:
+        pe = float(ever["hit"].mean())
+        out.update({"p_hit_ever": round(pe, 4), "p_hit_ever_mc_se": round(float(np.sqrt(pe * (1 - pe) / n)), 4),
+                    "p_ruin_then_hit": round(float((ever["ruin"] & ever["hit"]).mean()), 4),
+                    "median_end_ever_policy": round(float(np.median(ever["end"])), 2),
+                    "p5_end_ever_policy": round(float(np.percentile(ever["end"], 5)), 2),
+                    "p95_end_ever_policy": round(float(np.percentile(ever["end"], 95)), 2)})
+    return out
 
 
-def Historical(pack, cfg, stop=True):
-    res = Simulate(pack, np.arange(pack["n"])[None, :], cfg, stop=stop, record=True)
+def Historical(pack, cfg, stop=True, absorb_ruin=True):
+    res = Simulate(pack, np.arange(pack["n"])[None, :], cfg, stop=stop, record=True, absorb_ruin=absorb_ruin)
     eq = [round(float(b[0]), 2) for b, _ in res["path"]]
     dd = [round(float(-x[0]), 4) for _, x in res["path"]]
     hs = int(res["hit_step"][0])
@@ -210,12 +232,12 @@ def Historical(pack, cfg, stop=True):
             "equity": eq, "drawdown": dd}
 
 
-def Frontier(rows):
-    """Nondominated: no other row has p_hit >= and p_ruin <= with one strictly better."""
+def Frontier(rows, key="p_hit_before_ruin"):
+    """Nondominated: no other row has key >= and p_ruin <= with one strictly better."""
     out = []
     for a in rows:
-        dominated = any((b["p_hit"] >= a["p_hit"] and b["p_ruin"] <= a["p_ruin"]) and
-                        (b["p_hit"] > a["p_hit"] or b["p_ruin"] < a["p_ruin"]) for b in rows)
+        dominated = any((b[key] >= a[key] and b["p_ruin"] <= a["p_ruin"]) and
+                        (b[key] > a[key] or b["p_ruin"] < a["p_ruin"]) for b in rows)
         if not dominated:
             out.append(a["name"])
     return out
@@ -244,7 +266,7 @@ def AuditCompound(rows_by_season, seasons, sizers=("kelly1_cap100", "flat20pct",
                 Cfg(siz, "audit", "kelly", 1.0, cap=1.0) if siz == "kelly1_cap100" else
                 Cfg(siz, "audit", "flat", float(siz.replace("flat", "").replace("pct", "")) / 100))
             pack = Pack(BuildDays(rows_by_season, seasons, basis))
-            mine = Simulate(pack, np.arange(pack["n"])[None, :], cfg, stop=False)["end"][0]
+            mine = Simulate(pack, np.arange(pack["n"])[None, :], cfg, stop=False, absorb_ruin=False)["end"][0]
             report.append({"basis": basis, "sizer": siz, "compound_end": round(res["end"], 2), "vectorised_end": round(float(mine), 2),
                            "max_day_exposure": round(worst_exposure, 5), "max_ledger_gap": round(worst_gap, 4),
                            "negative_cash": negative, "bets": len(res["bets"])})
@@ -263,16 +285,16 @@ def Nested(rows_by_season, eval_seasons, train_from, basis, grid=None, n_sims=N_
         idx = CommonIndex(tp["n"], T, n_sims)
         scored = []
         for cfg in grid:
-            r = Simulate(tp, idx, cfg, stop=True, T=T)
+            r = Simulate(tp, idx, cfg, stop=True, T=T, absorb_ruin=True)
             scored.append((float(r["hit"].mean()), float(np.median(r["end"])), cfg["name"], cfg))
         scored.sort(key=lambda x: (-x[0], -x[1]))
         p, med, name, cfg = scored[0]
         choices.append({"season": s, "train": [train_from, s - 1], "train_days": tp["n"], "choice": name,
-                        "train_p_hit": round(p, 4), "train_median_end": round(med, 2)})
+                        "train_p_hit_before_ruin": round(p, 4), "train_median_end": round(med, 2)})
         days = [d for d in eval_pack_days if d["season"] == s]
         sp = Pack(days)
         for j in range(sp["n"]):
-            if hit:
+            if hit or ruin:   # both barriers absorbing: hold cash
                 f_r = 0.0
             else:
                 f = Fractions(cfg, np.array([bank]), t, T, sp["K"][j:j + 1], sp["M"][j:j + 1], sp["TIER"][j:j + 1])
@@ -310,23 +332,27 @@ def Run(rows_by_season=None, eval_seasons=None, train_from=TRAIN_FROM, out_dir=N
         idx_e, idx_l = CommonIndex(early["n"], T, n_sims), CommonIndex(late["n"], T, n_sims)
         rows = []
         for cfg in GRID + REFERENCES:
-            stop = Simulate(pack, idx, cfg, stop=True)
-            play = Simulate(pack, idx, cfg, stop=False)
+            stop = Simulate(pack, idx, cfg, stop=True, absorb_ruin=True)
+            ever = Simulate(pack, idx, cfg, stop=True, absorb_ruin=False)
+            play = Simulate(pack, idx, cfg, stop=False, absorb_ruin=False)
             hist = Historical(pack, cfg)
-            hist_play = Historical(pack, cfg, stop=False)
-            row = {"name": cfg["name"], "family": cfg["family"], "config": cfg, **BootStats(stop, n_sims),
+            hist_ever = Historical(pack, cfg, absorb_ruin=False)
+            hist_play = Historical(pack, cfg, stop=False, absorb_ruin=False)
+            row = {"name": cfg["name"], "family": cfg["family"], "config": cfg, **BootStats(stop, n_sims, ever),
                    "p_terminal_1m_playon": round(float((play["end"] >= TARGET).mean()), 4),
                    "median_end_playon": round(float(np.median(play["end"])), 2),
-                   "p_hit_if_only_2023_24_days": round(float(Simulate(early, idx_e, cfg, T=T)["hit"].mean()), 4),
-                   "p_hit_if_only_2025_26_days": round(float(Simulate(late, idx_l, cfg, T=T)["hit"].mean()), 4),
+                   "p_hit_before_ruin_if_only_2023_24_days": round(float(Simulate(early, idx_e, cfg, T=T)["hit"].mean()), 4),
+                   "p_hit_before_ruin_if_only_2025_26_days": round(float(Simulate(late, idx_l, cfg, T=T)["hit"].mean()), 4),
+                   "p_hit_ever_if_only_2023_24_days": round(float(Simulate(early, idx_e, cfg, T=T, absorb_ruin=False)["hit"].mean()), 4),
+                   "p_hit_ever_if_only_2025_26_days": round(float(Simulate(late, idx_l, cfg, T=T, absorb_ruin=False)["hit"].mean()), 4),
                    "hist": {k: v for k, v in hist.items() if k not in ("equity", "drawdown")},
-                   "hist_playon_end": hist_play["end"]}
+                   "hist_ever_policy_end": hist_ever["end"], "hist_playon_end": hist_play["end"]}
             rows.append((row, hist))
         front = set(Frontier([r for r, _ in rows if r["family"] != "reference"]))
         for r, _ in rows:
             r["on_frontier"] = r["name"] in front
         nested = Nested(rows_by_season, eval_seasons, train_from, basis, n_sims=n_sims, T=T)
-        ranked = sorted([r for r, _ in rows if r["family"] != "reference"], key=lambda r: (-r["p_hit"], r["p_ruin"]))
+        ranked = sorted([r for r, _ in rows if r["family"] != "reference"], key=lambda r: (-r["p_hit_before_ruin"], r["p_ruin"]))
         out["bases"][basis] = {"days": T, "bet_days": int((pack["M"].sum(axis=1) > 0).sum()), "bets": int(pack["M"].sum()),
                                "top_target_hit": ranked[0]["name"], "frontier": sorted(front),
                                "nested": {k: v for k, v in nested.items() if k != "equity"},
@@ -337,7 +363,8 @@ def Run(rows_by_season=None, eval_seasons=None, train_from=TRAIN_FROM, out_dir=N
                 for d, e, x in zip(pack["dates"], hist["equity"], hist["drawdown"]):
                     tidy.append({"date": d, "series": r["name"], "equity": e, "drawdown_pct": x, "basis": basis})
             frontier_rows.append({"date": last_date, "series": r["name"], "basis": basis, "family": r["family"],
-                                  "p_hit": r["p_hit"], "p_ruin": r["p_ruin"], "p_zero": r["p_zero"],
+                                  "p_hit_before_ruin": r["p_hit_before_ruin"], "p_ruin": r["p_ruin"],
+                                  "p_hit_ever": r["p_hit_ever"], "p_zero": r["p_zero"],
                                   "median_end": r["median_end"], "p5_end": r["p5_end"], "p95_end": r["p95_end"],
                                   "hist_end": r["hist"]["end"], "hist_max_dd": r["hist"]["max_dd"],
                                   "on_frontier": int(r["on_frontier"])})
@@ -371,12 +398,13 @@ def Main():
     print(json.dumps(out["audit_compound"], indent=0))
     for basis, b in out["bases"].items():
         print(f"== {basis}: days {b['days']} bet_days {b['bet_days']} bets {b['bets']} top {b['top_target_hit']}")
-        for r in sorted(b["rows"], key=lambda r: -r["p_hit"]):
+        for r in sorted(b["rows"], key=lambda r: -r["p_hit_before_ruin"]):
             h = r["hist"]
-            print(f"{'*' if r['on_frontier'] else ' '} {r['name']:30s} Phit {r['p_hit']:.4f}+-{r['p_hit_mc_se']:.4f} Pruin {r['p_ruin']:.4f}"
+            print(f"{'*' if r['on_frontier'] else ' '} {r['name']:30s} Pfirst {r['p_hit_before_ruin']:.4f}+-{r['p_hit_before_ruin_mc_se']:.4f}"
+                  f" Pever {r['p_hit_ever']:.4f} Pruin {r['p_ruin']:.4f}"
                   f" Pzero {r['p_zero']:.4f} med {r['median_end']:>12,.0f} p5 {r['p5_end']:>10,.0f} p95 {r['p95_end']:>12,.0f}"
                   f" | hist end {h['end']:>12,.0f} dd {h['max_dd']:.3f} hit {h['hit']} | playon P1M {r['p_terminal_1m_playon']:.4f}"
-                  f" | early {r['p_hit_if_only_2023_24_days']:.4f} late {r['p_hit_if_only_2025_26_days']:.4f}")
+                  f" | early {r['p_hit_before_ruin_if_only_2023_24_days']:.4f} late {r['p_hit_before_ruin_if_only_2025_26_days']:.4f}")
         print("nested:", json.dumps(b["nested"]))
 
 
