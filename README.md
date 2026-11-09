@@ -16,6 +16,9 @@ NFL predictive modelling and backtesting. Conventions for bots and contributors:
 - `python -m Backtest.PredictDay --date YYYY-MM-DD` - same-day picks from the frozen config
   (`Backtest/FrozenConfig.py`); per-run picks files + append-only prediction log; started games are not re-scored.
 - `python -m Backtest.GradePredictions --season 2026` - grades the log (pre-kickoff rows only) into `grades_<season>.json`.
+- `python -m Backtest.ForwardWalk --season 2026` - frozen-strategy scorecard (forward holdout + labelled pseudo-forward walk).
+- `python -m Backtest.Calibration --seasons 2026` - model calibration vs the closing market (Brier, log loss, reliability bins).
+- `python PlayByPlay/DriveCheck.py --season 2026` / `python PlayByPlay/TeamEfficiency.py --season 2026` - drive rebuild check, weekly team EPA/success.
 - `python -m Backtest.AssessLive` - one-shot read-only NFL quote and game-state report (no orders), plus the shared
   live file `<live-dir>/<date>_live/<date>_live.jsonl` + `_live_latest.md` for Degen. See `docs/live-odds.md`.
 

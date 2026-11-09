@@ -15,8 +15,12 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: A
 | `Backtest/Version.py` | `ModelVersion()` and `NewRunId()` stamped on every output |
 | `Backtest/PredictDay.py` | same-day picks CLI (Basketbot's `PredictDay(date)` API) + append-only log |
 | `Backtest/GradePredictions.py` | grades the log against final scores (separate file, log is read-only) |
+| `Backtest/ForwardWalk.py` | frozen-strategy scorecard: clean forward holdout + labelled pseudo-forward walk (`seen_by_search` flag), daily equity CSV |
+| `Backtest/Calibration.py` | Brier / log loss / reliability bins of walk-forward models vs the de-vigged closing market (evaluation only) |
 | `Backtest/AssessLive.py`, `LiveReadiness.py`, `LiveFile.py` | one-shot read-only live odds/game state + Degen's live file |
 | `PlayByPlay/` | play-by-play reconstruction/simulation. Kept separate from `Backtest/` |
+| `PlayByPlay/DriveCheck.py` | independent drive rebuild from raw pbp, validated against nflverse `fixed_drive` / result / play count |
+| `PlayByPlay/TeamEfficiency.py` | weekly team EPA/play + success rate (offense, defense, season-to-date) |
 | `tests/` | `python -m unittest discover -s tests` (no network, no `data/` needed) |
 | `docs/` | write-ups (`live-odds.md`) |
 | `data/`, `stats/` | gitignored raw pulls and outputs. Never commit. `examples/` is Tim's untracked folder: leave it alone |
@@ -26,6 +30,10 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: A
 ```
 .venv\Scripts\python.exe -m Backtest.PredictDay --date YYYY-MM-DD [--week] [--next] [--no-refresh]
 .venv\Scripts\python.exe -m Backtest.GradePredictions --season 2026 [--no-refresh]
+.venv\Scripts\python.exe -m Backtest.ForwardWalk --season 2026 [--out-dir DIR --base NAME]
+.venv\Scripts\python.exe -m Backtest.Calibration --seasons 2023,2024,2025,2026 [--out-dir DIR --base NAME]
+.venv\Scripts\python.exe PlayByPlay\DriveCheck.py --season 2026 [--out-dir DIR --base NAME]
+.venv\Scripts\python.exe PlayByPlay\TeamEfficiency.py --season 2026 [--out-dir DIR --base NAME]
 .venv\Scripts\python.exe -m Backtest.AssessLive --date YYYY-MM-DD [--matchup TB@CHI] [--live-dir DIR] [--no-live-file]
 .venv\Scripts\python.exe -m unittest discover -s tests
 ```
