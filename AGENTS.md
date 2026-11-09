@@ -17,6 +17,7 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: A
 | `Backtest/GradePredictions.py` | grades the log against final scores (separate file, log is read-only) |
 | `Backtest/ForwardWalk.py` | frozen-strategy scorecard: clean forward holdout + labelled pseudo-forward walk (`seen_by_search` flag), daily equity CSV |
 | `Backtest/Compound.py` | ONE continuous $10k bankroll across seasons (no reset): nested walk-forward choice, frozen compounded, labelled in-sample best, baselines, day bootstrap P($1M)/P(ruin). Headline metric per Tim (2026-11-09) |
+| `Backtest/MillionTarget.py` | research: P(hit $1M) vs P(ruin) sizing frontier on the continuous $10k bank (day-reserved cash, stop-at-target, day-block bootstrap, nested comparator, Compound mechanics audit). Not live |
 | `Backtest/CandidateConfigs.py` | candidate sizing configs, NOT wired into PredictDay; adopting one = new frozen config + new holdout |
 | `Backtest/Calibration.py` | Brier / log loss / reliability bins of walk-forward models vs the de-vigged closing market (evaluation only) |
 | `Backtest/AssessLive.py`, `LiveReadiness.py`, `LiveFile.py` | one-shot read-only live odds/game state + Degen's live file |
@@ -33,6 +34,7 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: A
 .venv\Scripts\python.exe -m Backtest.PredictDay --date YYYY-MM-DD [--week] [--next] [--no-refresh]
 .venv\Scripts\python.exe -m Backtest.GradePredictions --season 2026 [--no-refresh]
 .venv\Scripts\python.exe -m Backtest.ForwardWalk --season 2026 [--out-dir DIR --base NAME]
+.venv\Scripts\python.exe -m Backtest.MillionTarget [--out-dir DIR --base NAME] [--sims 5000]
 .venv\Scripts\python.exe -m Backtest.Compound [--out-dir DIR --base NAME] [--sims 5000]
 .venv\Scripts\python.exe -m Backtest.Calibration --seasons 2023,2024,2025,2026 [--out-dir DIR --base NAME]
 .venv\Scripts\python.exe PlayByPlay\DriveCheck.py --season 2026 [--out-dir DIR --base NAME]
