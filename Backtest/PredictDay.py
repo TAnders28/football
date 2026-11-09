@@ -30,7 +30,17 @@ What it does
      fires, else PASS with the model's lean. Odds shown are the nflverse posted lines at pull time
      (the backtest used closing lines, so prices may still move).
 
-Writes data/backtest/predictions/picks_<date>[_week].json (readable JSON) and .md, same layout as basketball.
+Outputs (never overwrite an earlier run)
+  * data/backtest/predictions/picks_<date>[_week]_<HHMMSS>.json/.md  one pair per run (ET clock)
+  * data/backtest/predictions/picks_<date>[_week]_latest.md          copy of the newest table (overwritten)
+  * data/predictions/<season>.jsonl  APPEND-ONLY log, one row per not-yet-started game per run:
+        {created_at, game_id, start_time, pick, model_prob, market_price, price_time, source,
+         model_version, run_id, ...}. Rows are never rewritten or deleted; a rerun adds new rows.
+  * Games whose kickoff (ET) is <= now are shown as "started, not predicted": not re-scored, not
+    flagged as bets, not logged. Grade the log with Backtest.GradePredictions.
+
+Rules come from Backtest.FrozenConfig.FROZEN (frozen 2026-11-08). Every output carries model_version
+and run_id from Backtest.Version.
 """
 
 import argparse
@@ -47,11 +57,14 @@ from Backtest.Features import Bettable, Logit, SlateOf, _avg
 from Backtest.Lab import AllRows, AttachModels, Kelly, LoadSeason, SelEdge
 from Backtest.Hunt import FILTERS, Sel
 from Backtest.Model import MarginModel, SeasonAverageMargins
-from Backtest.Odds import FairProbs
+from Backtest.Odds import FairProbs, ImpliedProb
+from Backtest.FrozenConfig import FROZEN, ConfigHash, IsForwardHoldout
+from Backtest.Version import ModelVersion, NewRunId
 
 ET = ZoneInfo("America/New_York")
 TODAY_DIR = os.path.join("data", "backtest", "today")          # schedule cache
-PRED_DIR = os.path.join("data", "backtest", "predictions")    # picks_<date>.json/.md, like basketball
+PRED_DIR = os.path.join("data", "backtest", "predictions")    # picks_<date>_<HHMMSS>.json/.md, like basketball
+LOG_DIR = os.path.join("data", "predictions")                 # <season>.jsonl append-only prediction log
 OUTCOME_KEYS = ("home_score", "away_score", "result", "total", "overtime")
 
 
@@ -165,15 +178,21 @@ def Team(r, side):
     return r[f"{side}_team"] if side else None
 
 
-def ScoreRows(rows):
-    v1, value, div = SelEdge("p_margin", 0.05), SelEdge("p_full2", 0.08), Sel("p_full3", 0.02, filt=FILTERS["div"])
-    half = Kelly(0.5, 0.10)
+def ScoreRows(rows, config=None):
+    cfg = config or FROZEN
+    cv1, cval, cdiv = cfg["v1_column"], cfg["value"], cfg["div_addon"]
+    v1 = SelEdge(cv1["model"], cv1["min_edge"])
+    value = SelEdge(cval["model"], cval["min_edge"])
+    div = Sel(cdiv["model"], cdiv["min_edge"], filt=FILTERS[cdiv["filter"]])
+    half = Kelly(cval["stake"]["fraction"], cval["stake"]["cap"])
+    div_pct = cdiv["stake"]["pct"]
+    vm = cval["model"]
     out = []
     for r in rows:
         fav = "home" if r["mkt_home"] >= 0.5 else "away"
-        lean = "home" if r["p_full2"] >= 0.5 else "away"
-        p_lean = r["p_full2"] if lean == "home" else 1 - r["p_full2"]
-        eh = r["p_full2"] - r["mkt_home"]
+        lean = "home" if r[vm] >= 0.5 else "away"
+        p_lean = r[vm] if lean == "home" else 1 - r[vm]
+        eh = r[vm] - r["mkt_home"]
         best_edge, edge_side = (eh, "home") if eh >= -eh else (-eh, "away")
         c1 = v1(r) if r["has_odds"] else []
         cv = value(r) if r["has_odds"] else []
@@ -190,20 +209,20 @@ def ScoreRows(rows):
         elif cv:
             c = cv[0]
             st = half(c, 1.0)
-            rec = {"action": "BET", "team": c["team"], "odds": c["odds"], "stake_pct": round(st * 100, 1), "_p": c["p"], "rule": "value_full2_edge8",
-                   "why": f"Sparse value fires: model {c['p']*100:.0f}% vs market {c['p_mkt']*100:.0f}% (+{c['edge']*100:.1f} pts >= 8); half Kelly {st*100:.1f}% of bank."}
+            rec = {"action": "BET", "team": c["team"], "odds": c["odds"], "stake_pct": round(st * 100, 1), "_p": c["p"], "rule": cval["rule"],
+                   "why": f"Sparse value fires: model {c['p']*100:.0f}% vs market {c['p_mkt']*100:.0f}% (+{c['edge']*100:.1f} pts >= {cval['min_edge']*100:g}); Kelly x{cval['stake']['fraction']:g} {st*100:.1f}% of bank."}
         elif cd:
             c = cd[0]
-            rec = {"action": "BET", "team": c["team"], "odds": c["odds"], "stake_pct": 2.0, "_p": c["p"], "rule": "div_full3_edge2",
-                   "why": f"Divisional add-on: full3 model {c['p']*100:.0f}% vs market {c['p_mkt']*100:.0f}% (+{c['edge']*100:.1f} pts); flat 2% of bank."}
+            rec = {"action": "BET", "team": c["team"], "odds": c["odds"], "stake_pct": round(div_pct * 100, 1), "_p": c["p"], "rule": cdiv["rule"],
+                   "why": f"Divisional add-on: full3 model {c['p']*100:.0f}% vs market {c['p_mkt']*100:.0f}% (+{c['edge']*100:.1f} pts); flat {div_pct*100:g}% of bank."}
         else:
             rec = {"action": "PASS", "team": Team(r, lean), "stake_pct": 0.0,
-                   "why": f"No edge: best model edge {best_edge*100:+.1f} pts on {Team(r, edge_side)} (< 8 needed); lean {Team(r, lean)} {p_lean*100:.0f}% to win."}
+                   "why": f"No edge: best model edge {best_edge*100:+.1f} pts on {Team(r, edge_side)} (< {cval['min_edge']*100:g} needed); lean {Team(r, lean)} {p_lean*100:.0f}% to win."}
         side = "home" if rec["team"] == r["home_team"] else "away"
         if rec["action"] == "BET":
             prob = rec.pop("_p")
         elif r["has_odds"]:
-            prob = r["p_full2"] if side == "home" else 1 - r["p_full2"]
+            prob = r[vm] if side == "home" else 1 - r[vm]
         else:
             pm = 1 / (1 + math.exp(-r["margin_logit"]))
             prob = pm if side == "home" else 1 - pm
@@ -250,13 +269,80 @@ def Markdown(meta, preds):
         sp = "-" if p["spread_home"] is None else f"{p['spread_home']:+g}"
         rest = f"{p['away_rest'] if p['away_rest'] is not None else '-'}/{p['home_rest'] if p['home_rest'] is not None else '-'}"
         bet = f"**{r['stake_pct']:g}% @ {Ml(r.get('odds'))}**" if r["action"] == "BET" else "-"
+        if r["action"] == "STARTED":
+            L.append(f"| {Kick(p['gameday'], p['kickoff_et'], len(days) > 1)} | {p['matchup']}{' (div)' if p['divisional'] else ''} | "
+                     f"{p['records'].replace(' @ ', ' / ')} | {rest} | {Ml(p['away_ml'])}/{Ml(p['home_ml'])}, {sp} | "
+                     "- | - | - | - | - | - | started, not predicted | - | - | - |")
+            continue
         L.append(f"| {Kick(p['gameday'], p['kickoff_et'], len(days) > 1)} | {p['matchup']}{' (div)' if p['divisional'] else ''} | "
                  f"{p['records'].replace(' @ ', ' / ')} | {rest} | {Ml(p['away_ml'])}/{Ml(p['home_ml'])}, {sp} | "
                  f"{s['always_home']} | {s['market_fav'] or '-'} | {s['margin_model_fav']} | {s['model_edge_5pct_v1'] or '-'} | "
                  f"{s['value_full2_edge8'] or '-'} | {s['div_full3_edge2'] or '-'} | **{r['team']}** | {r['prob'] * 100:.0f}% | {r['confidence']} | {bet} |")
     L += ["", f"Lines: nflverse posted lines pulled {meta['pulled_at_et']} (backtest used closing lines; prices may move). "
-          "Bet = a rule that made money out-of-sample 2023-25 fired (value8: half Kelly, cap 10%; div_addon: flat 2% of bank); '-' = pass, Pick is the model lean."]
+          f"Bet = a frozen rule fired ({meta['frozen_config']}, frozen {meta['frozen_at']}; value8: half Kelly, cap 10%; div_addon: flat 2% of bank); "
+          "'-' = pass, Pick is the model lean. 2023-25 backtest results are contaminated by search; games after the freeze date are the forward holdout.",
+          "", f"model_version `{meta['model_version']}` | run_id `{meta['run_id']}` | generated {meta['generated_at_et']}"]
     return "\n".join(L) + "\n"
+
+
+def StartTime(gameday, gametime):
+    """Kickoff as an ET-aware datetime (nflverse gametime is ET wall clock). Unknown time -> 13:00."""
+    return datetime.fromisoformat(f"{gameday}T{gametime or '13:00'}").replace(tzinfo=ET)
+
+
+def MarkStarted(preds, now):
+    """Games whose kickoff is <= now are not re-scored, not flagged as bets and not logged."""
+    for p in preds:
+        start = StartTime(p["gameday"], p["kickoff_et"])
+        p["start_time"] = start.isoformat()
+        p["started"] = start <= now
+        if p["started"]:
+            p["recommended"] = {"action": "STARTED", "team": None, "stake_pct": 0.0, "prob": None,
+                                "confidence": None, "disagrees": [],
+                                "why": "started, not predicted (kickoff was at or before this run)"}
+            p["strategies"] = {k: None for k in p["strategies"]}
+    return preds
+
+
+def LogRows(preds, meta):
+    """Append-only log rows for games that had not started at created_at."""
+    rows = []
+    for p in preds:
+        if p.get("started"):
+            continue
+        r = p["recommended"]
+        side = None if r["team"] is None else ("home" if p["matchup"].endswith(f"@ {r['team']}") else "away")
+        odds = p.get(f"{side}_ml") if side else None
+        mkt_home = p.get("market_home_prob")
+        rows.append({
+            "created_at": meta["created_at"], "game_id": p["game_id"], "start_time": p["start_time"],
+            "season": meta["season"], "week": p["week"], "matchup": p["matchup"],
+            "pick": r["team"], "pick_side": side, "model_prob": r["prob"],
+            "market_price": round(ImpliedProb(odds), 4) if odds is not None else None,
+            "market_price_basis": "implied prob of the posted American moneyline on the pick, vig included" if odds is not None else None,
+            "market_odds": odds,
+            "market_prob_novig": (None if mkt_home is None or side is None else round(mkt_home if side == "home" else 1 - mkt_home, 4)),
+            "price_time": None,
+            "price_time_note": "nflverse schedule lines carry no source quote time; lines_pulled_at is our retrieval time",
+            "lines_pulled_at": meta.get("pulled_at_utc"),
+            "action": r["action"], "rule": r.get("rule"), "stake_pct": r["stake_pct"], "confidence": r["confidence"],
+            "source": meta.get("source"), "model_version": meta["model_version"], "run_id": meta["run_id"],
+            "frozen_config": meta["frozen_config"], "forward_holdout": p["forward_holdout"],
+        })
+    return rows
+
+
+def AppendLog(rows, season, log_dir=None):
+    """Append rows to <log_dir>/<season>.jsonl. Opens in append mode only; never rewrites."""
+    if not rows:
+        return None
+    log_dir = log_dir or LOG_DIR
+    os.makedirs(log_dir, exist_ok=True)
+    path = os.path.join(log_dir, f"{season}.jsonl")
+    with open(path, "a", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps(row, sort_keys=False) + "\n")
+    return path
 
 
 def SeasonOf(date):
@@ -264,10 +350,13 @@ def SeasonOf(date):
     return y if m >= 3 else y - 1
 
 
-def PredictDay(date=None, week=False, refresh=True, season=None, next_slate=False, write=True):
+def PredictDay(date=None, week=False, refresh=True, season=None, next_slate=False, write=True,
+               now=None, pred_dir=None, log_dir=None):
     """Score the NFL games on ET gameday `date` (YYYY-MM-DD; default today ET). Returns
-    {"meta", "games", "markdown"}; games is [] when nothing is scheduled that day."""
-    now = datetime.now(ET)
+    {"meta", "games", "markdown"}; games is [] when nothing is scheduled that day.
+    `now` (ET-aware) is for tests; pred_dir/log_dir override the output folders."""
+    now = (now or datetime.now(ET)).astimezone(ET)
+    run_id, model_version = NewRunId(now), ModelVersion()
     today = now.date().isoformat()
     date = date or today
     season = season or SeasonOf(date)
@@ -285,7 +374,8 @@ def PredictDay(date=None, week=False, refresh=True, season=None, next_slate=Fals
         msg = (f"No NFL games on {asked} (ET), season {season}. "
                + (f"Next slate: {nxt} -> run with --date {nxt} (or add --next)." if nxt else "No later unplayed games."))
         return {"meta": {"date": asked, "today_et": today, "note": msg, "next_gameday": nxt,
-                         "pulled_at_et": pulled_et}, "games": [], "markdown": msg}
+                         "pulled_at_et": pulled_et, "model_version": model_version, "run_id": run_id},
+                "games": [], "markdown": msg}
     note = (f"{len(slate)} game(s) on {asked}" if date == asked
             else f"no NFL game on {asked}; scoring the next slate ({date})")
     prior = LoadSeason(season - 1)
@@ -293,21 +383,37 @@ def PredictDay(date=None, week=False, refresh=True, season=None, next_slate=Fals
     rbs = AllRows(2012, season - 1)
     rbs[season] = rows
     AttachModels(rbs)
-    preds = ScoreRows(rows)
+    preds = MarkStarted(ScoreRows(rows), now)
+    for p in preds:
+        p["model_version"], p["run_id"] = model_version, run_id
+        p["forward_holdout"] = IsForwardHoldout(p["gameday"])
     days = sorted({p["gameday"] for p in preds})
     meta = {"date": date, "requested_date": asked, "today_et": today, "tonight_note": note,
             "slate_label": f"week {slate[0]['week']}, {days[0]}" + (f" to {days[-1]}" if len(days) > 1 else ""),
             "source": sched.get("source"), "pulled_at_utc": pulled, "pulled_at_et": pulled_et,
             "last_finished_day": last_day, "finished_games_used": n_hist,
-            "model_train_seasons": f"2013-{season - 1}", "generated_at_et": now.strftime("%Y-%m-%d %H:%M ET")}
+            "model_train_seasons": f"2013-{season - 1}", "generated_at_et": now.strftime("%Y-%m-%d %H:%M:%S ET"),
+            "created_at": now.isoformat(timespec="seconds"), "season": season,
+            "model_version": model_version, "run_id": run_id,
+            "frozen_config": FROZEN["name"], "frozen_config_hash": ConfigHash(), "frozen_at": FROZEN["frozen_at"],
+            "started_not_predicted": [p["game_id"] for p in preds if p["started"]]}
     md = Markdown(meta, preds)
     if write:
-        os.makedirs(PRED_DIR, exist_ok=True)
-        stem = os.path.join(PRED_DIR, f"picks_{date}{'_week' if week else ''}")
-        with open(stem + ".json", "w", encoding="utf-8") as fh:
+        pred_dir = pred_dir or PRED_DIR
+        os.makedirs(pred_dir, exist_ok=True)
+        base = f"picks_{date}{'_week' if week else ''}"
+        stem = os.path.join(pred_dir, f"{base}_{now.strftime('%H%M%S')}")
+        if os.path.exists(stem + ".json") or os.path.exists(stem + ".md"):
+            stem += "_" + run_id.split("-")[-1]           # same second: never overwrite an earlier run
+        with open(stem + ".json", "x", encoding="utf-8") as fh:
             json.dump({"meta": meta, "games": preds}, fh, indent=1)
-        with open(stem + ".md", "w", encoding="utf-8") as fh:
+        with open(stem + ".md", "x", encoding="utf-8") as fh:
             fh.write(md)
+        with open(os.path.join(pred_dir, f"{base}_latest.md"), "w", encoding="utf-8") as fh:
+            fh.write(md)
+        log_rows = LogRows(preds, meta)
+        meta["log_path"] = AppendLog(log_rows, season, log_dir)
+        meta["log_rows_appended"] = len(log_rows)
         meta["written"] = stem + ".json/.md"
     return {"meta": meta, "games": preds, "markdown": md}
 
@@ -327,7 +433,8 @@ def Main():
     out = PredictDay(a.date, a.week, not a.no_refresh, a.season, a.next)
     print(out["markdown"])
     if out["meta"].get("written"):
-        print(f"wrote {out['meta']['written']}")
+        print(f"wrote {out['meta']['written']} (+ latest.md)")
+        print(f"log: {out['meta'].get('log_rows_appended', 0)} row(s) appended to {out['meta'].get('log_path')}")
 
 
 if __name__ == "__main__":
