@@ -25,8 +25,19 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: A
 | `PlayByPlay/DriveCheck.py` | independent drive rebuild from raw pbp, validated against nflverse `fixed_drive` / result / play count |
 | `PlayByPlay/TeamEfficiency.py` | weekly team EPA/play + success rate (offense, defense, season-to-date) |
 | `tests/` | `python -m unittest discover -s tests` (no network, no `data/` needed) |
+| `bootstrap.ps1`, `requirements.lock.txt` | create `.venv` with `py -3.14` if missing, install pinned deps, run unit tests |
 | `docs/` | write-ups (`live-odds.md`) |
 | `data/`, `stats/` | gitignored raw pulls and outputs. Never commit. `examples/` is Tim's untracked folder: leave it alone |
+
+## Setup
+
+From `E:\Football\football`:
+
+```
+.\bootstrap.ps1
+```
+
+Creates `.venv` with `py -3.14` if missing, installs pinned deps from `requirements.lock.txt`, and runs the unit tests. Use `.venv\Scripts\python.exe` after that.
 
 ## Entry points (Windows, from `E:\Football\football`)
 

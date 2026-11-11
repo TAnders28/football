@@ -2,6 +2,10 @@
 
 NFL predictive modelling and backtesting. Conventions for bots and contributors: see `AGENTS.md`.
 
+## Setup
+
+From `E:\Football\football`, run `.\bootstrap.ps1`. That creates `.venv` with Python 3.14 if needed, installs the pinned deps in `requirements.lock.txt`, and runs the unit tests. Use `.venv\Scripts\python.exe` for commands below.
+
 ## Layout
 
 - `data/` - raw pulls and outputs (gitignored), incl. `data/predictions/<season>.jsonl` (append-only log)
