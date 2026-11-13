@@ -38,6 +38,7 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: A
 | `Backtest/InGameRuleSim.py` | research/simulation: 13 pre-fixed in-game rules (close-game gap, early swings follow/fade, home 30-50 fade) on Kalshi 1-min held-out data, mid/taker fills, Tim's fee est + Kalshi verified fee, flat + quarter-Kelly bankrolls, PathSim. All PASS 2026-11-13 |
 | `Backtest/PathSim.py` | seeded randomized paths for day-level strategies: random start, block bootstrap, shuffle, restarts after ruin / bad start; P(ruin), P($1M), quantiles. `StakingEnv.RandomIdx` gives the same orders as `idx` |
 | `Backtest/BankrollPlot.py` | shared framing for bankroll charts under Tim's season-axis rule (one season: first game to last game; multi-season: game-day index with a marker at each season boundary, no offseason flats). `Backtest/RenderBankrollCharts.py` re-renders AgentDocs drafts from existing CSVs |
+| `Backtest/CommonFormat.py` | emit the common cross-sport calibration, $10k bankroll and edges files (Degen plan 2026-11-13): walk-forward `p_full2_kmid_T60` vs Kalshi T-60 mid, plus optional book-close secondary. Simulation only |
 | `Backtest/SnapshotRunner.py` | scheduled entry for the price-capture tasks: single-instance lock, quiet logs to `data/logs/snapshots/` |
 | `Backtest/Calibration.py` | Brier / log loss / reliability bins of walk-forward models vs the de-vigged closing market (evaluation only) |
 | `Backtest/AssessLive.py`, `LiveReadiness.py`, `LiveFile.py` | one-shot read-only live odds/game state + Degen's live file |
@@ -89,6 +90,7 @@ Creates `.venv` with `py -3.14` if missing, installs pinned deps from `requireme
 .venv\Scripts\python.exe -m Backtest.LiveInGame --game 2026_10_LAC_BAL [--state-json FILE --live-root DIR --no-file]
 .venv\Scripts\python.exe -m Backtest.InGameRuleSim [--paths 5000 --seed 20261113]
 .venv\Scripts\python.exe -m Backtest.RenderBankrollCharts   # re-render bankroll drafts from existing AgentDocs CSVs (no resim)
+.venv\Scripts\python.exe -m Backtest.CommonFormat [--cal-dir DIR --bank-dir DIR]  # common calibration + $10k bankroll CSVs
 .venv\Scripts\python.exe -m Backtest.SnapshotPrices --week auto --label adhoc
 .venv\Scripts\python.exe -m unittest discover -s tests
 ```
