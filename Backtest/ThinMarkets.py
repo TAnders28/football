@@ -912,17 +912,24 @@ def WeekRange(rows):
 
 
 def Main():
+    global BOOT
     ap = argparse.ArgumentParser(description="Thin-markets favourite-longshot test (run when Tim approves).")
     ap.add_argument("--out-dir", default=r"E:\AgentDocs\American-Footbot\2026-11-13_thin-markets")
     ap.add_argument("--base", default="2026-11-13_thin-markets")
     ap.add_argument("--skip-pull", action="store_true")
+    ap.add_argument("--skip-rules", action="store_true",
+                    help="skip the model-free rule search (original FLB study only)")
+    ap.add_argument("--normal", action="store_true", help="leave process at Normal priority")
+    ap.add_argument("--workers", type=int, default=max(1, (__import__('os').cpu_count() or 4) // 4),
+                    help="workers for the model-free rule search (default cpu/4)")
     ap.add_argument("--pull-limit", type=int, default=0)
     ap.add_argument("--boot", type=int, default=BOOT)
     ap.add_argument("--seed", type=int, default=SEED)
     a = ap.parse_args()
-    SetBelowNormal()
+    if not a.normal:
+        SetBelowNormal()
     ForceIPv4()
-    globals()['BOOT'] = a.boot
+    BOOT = a.boot
     run_id = NewRunId()
     rng = np.random.default_rng(a.seed)
     os.makedirs(a.out_dir, exist_ok=True)
@@ -1010,6 +1017,36 @@ def Main():
     )
     WriteBinChart(line_ask["holdout_bins"], line_ask["fit_bins"], base + "_bins_draft.png",
                   "Favourite-longshot calibration, totals+spreads, ask fill")
+
+    rules_meta = None
+    if not a.skip_rules:
+        from Backtest.ThinMarketRules import RunRules
+        print("starting model-free rule search...", flush=True)
+        rules_meta = RunRules(
+            a.out_dir, base=base, entries=entries, markets=markets, fees=fees,
+            workers=a.workers, seed=a.seed,
+        )
+        # Point the original report at the rule-search companion files.
+        try:
+            pointer = [
+                "",
+                "",
+                "## Model-free rule search",
+            ]
+            if rules_meta.get("partial"):
+                missing = ", ".join(rules_meta.get("missing") or [])
+                pointer.append(f"**PARTIAL COVERAGE: missing {missing}.**")
+                pointer.append("")
+            pointer.append(
+                f"See `{a.base}_rules.md`, `_rules_grid.csv`, `_rules_top50.csv`, and `_rules_mc.csv`. "
+                f"Grid size {rules_meta.get('n_configs')}; new lower-bound tally {rules_meta.get('new_tally')}."
+            )
+            pointer.append(f"Verdict: {rules_meta.get('verdict')}")
+            with open(base + ".md", "a", encoding="utf-8") as fh:
+                fh.write("\n".join(pointer) + "\n")
+        except OSError as exc:
+            print("could not append rule-search pointer to md:", exc, flush=True)
+
     print(json.dumps({
         "run_id": run_id, "code": CodeVersion(),
         "median_width_lines": med_lines, "median_width_ml": med_ml,
@@ -1018,6 +1055,10 @@ def Main():
         "bank_flat_ask": line_ask["bank_tim"]["flat100"],
         "verdict": verdict, "maker_fees": maker["verdict"],
         "out": a.out_dir,
+        "rules_best": None if not rules_meta else (rules_meta.get("best") or {}).get("id"),
+        "rules_spa_p": None if not rules_meta else (rules_meta.get("spa") or {}).get("spa_p"),
+        "rules_tally": None if not rules_meta else rules_meta.get("new_tally"),
+        "rules_partial": None if not rules_meta else rules_meta.get("partial"),
     }, indent=1, default=_JsonDefault), flush=True)
 
 
