@@ -27,6 +27,10 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: A
 | `Backtest/KalshiReality.py` | research: frozen rule priced at Kalshi executable ask at T-90/T-15 vs closing line, Tim's fee estimate and the verified Kalshi taker fee, plus PathSim distributions. Not live |
 | `DataPull/PullPolymarketHistory.py` | Polymarket NFL game moneyline price history (Gamma events tag 450 + CLOB /prices-history, kickoff-6h..+5min, 1-min) -> `data/prices/polymarket_history_<season>.jsonl` (2024 on; public API) |
 | `Backtest/PolyReality.py` | research: frozen rule filled at the Polymarket history price (mid; Tim's fill assumption) at T-90/T-15, Tim's fee estimate and Polymarket sports fee 0.05*p*(1-p), plus PathSim. Not live |
+| `DataPull/PullInGameHistory.py` | Kalshi home-market 1-min candles + Polymarket 1-min prices-history, kickoff-3h..+5.5h -> `data/prices/ingame_kalshi|poly_<season>.jsonl` (public API) |
+| `Backtest/InGameCalibration.py` | research: in-game (and T-3h pregame) market calibration, 1-min mid samples in pbp in-play windows, naive + game-cluster CIs, Brier/ECE by quarter/season |
+| `Backtest/PregameModelCalibration.py` | research: walk-forward p_full2 vs de-vigged close vs Kalshi/Polymarket T-90 mid - reliability, Brier, log loss (game bootstrap) |
+| `Backtest/PlotGameProbs.py` | one-game chart: Kalshi + Polymarket mid over time (pregame + in-game, halftime shaded, scoring plays), pregame p_full2 and close as flat reference lines (no in-game model) -> `data/backtest/game_charts/<game_id>_draft.png` |
 | `Backtest/PathSim.py` | seeded randomized paths for day-level strategies: random start, block bootstrap, shuffle, restarts after ruin / bad start; P(ruin), P($1M), quantiles. `StakingEnv.RandomIdx` gives the same orders as `idx` |
 | `Backtest/SnapshotRunner.py` | scheduled entry for the price-capture tasks: single-instance lock, quiet logs to `data/logs/snapshots/` |
 | `Backtest/Calibration.py` | Brier / log loss / reliability bins of walk-forward models vs the de-vigged closing market (evaluation only) |
@@ -69,6 +73,10 @@ Creates `.venv` with `py -3.14` if missing, installs pinned deps from `requireme
 .venv\Scripts\python.exe -m Backtest.KalshiReality [--out-dir DIR --base NAME --paths 5000 --seed 20261113]
 .venv\Scripts\python.exe -m DataPull.PullPolymarketHistory   # forces IPv4 (Tomputer IPv6 to Cloudflare stalls)
 .venv\Scripts\python.exe -m Backtest.PolyReality [--out-dir DIR --base NAME --paths 5000 --seed 20261113]
+.venv\Scripts\python.exe -m DataPull.PullInGameHistory   # resumable; matplotlib is in .venv for the charts
+.venv\Scripts\python.exe -m Backtest.InGameCalibration [--boot 2000 --seed 20261113]
+.venv\Scripts\python.exe -m Backtest.PregameModelCalibration
+.venv\Scripts\python.exe -m Backtest.PlotGameProbs --game 2026_09_CLE_NO [--game ...]
 .venv\Scripts\python.exe -m Backtest.SnapshotPrices --week auto --label adhoc
 .venv\Scripts\python.exe -m unittest discover -s tests
 ```
