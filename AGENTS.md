@@ -19,6 +19,7 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: A
 | `Backtest/Compound.py` | ONE continuous $10k bankroll across seasons (no reset): nested walk-forward choice, frozen compounded, labelled in-sample best, baselines, day bootstrap P($1M)/P(ruin). Headline metric per Tim (2026-11-09) |
 | `Backtest/MillionTarget.py` | research: P(hit $1M) vs P(ruin) sizing frontier on the continuous $10k bank (day-reserved cash, stop-at-target, day-block bootstrap, nested comparator, Compound mechanics audit). Not live |
 | `Backtest/CandidateConfigs.py` | candidate sizing configs, NOT wired into PredictDay; adopting one = new frozen config + new holdout |
+| `Backtest/StakingEnv.py`, `Backtest/RlStaking.py` | research: learned day-level staking policy (CEM over a contextual Kelly/parlay policy), walk-forward 2019-24 + one-time 2025-26 holdout (`data/backtest/rl/HOLDOUT_USED.json`). Sim only, not live |
 | `Backtest/Calibration.py` | Brier / log loss / reliability bins of walk-forward models vs the de-vigged closing market (evaluation only) |
 | `Backtest/AssessLive.py`, `LiveReadiness.py`, `LiveFile.py` | one-shot read-only live odds/game state + Degen's live file |
 | `PlayByPlay/` | play-by-play reconstruction/simulation. Kept separate from `Backtest/` |
