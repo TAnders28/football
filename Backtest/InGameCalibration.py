@@ -168,6 +168,9 @@ def Calibrate(samples, boot, rng):
     glo, ghi = q(np.array([b[1] for b in bo]))
     elo, ehi = q(np.array([b[2] for b in bo]))
     blo, bhi = q(np.array([b[3] for b in bo]))
+    if not bo:   # boot=0: point estimates only
+        olo = ohi = glo = ghi = np.full(BINS, np.nan)
+        elo = ehi = blo = bhi = np.nan
     c_all, y_all, p_all = cnt.sum(0), sy.sum(0), sp.sum(0)
     rows = []
     for b in range(BINS):

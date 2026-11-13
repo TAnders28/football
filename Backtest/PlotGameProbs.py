@@ -1,7 +1,7 @@
 r"""
 One-game chart: Kalshi and Polymarket mid (home win probability) over time, pregame and in-game, halftime shaded,
-scoring plays marked, with our walk-forward PREGAME model (p_full2) and the de-vigged closing line as horizontal
-reference lines. We have no in-game model; the model line is a pregame number carried across for reference only.
+scoring plays marked, our held-out in-game model (Backtest.InGameWP, ingame_wp_v1; per play, UNVALIDATED for betting),
+and our walk-forward PREGAME model (p_full2, the in-game prior) and the de-vigged closing line as horizontal reference lines.
 
     .venv\Scripts\python.exe -m Backtest.PlotGameProbs --game 2026_09_KC_BUF [--out-dir DIR]
 
@@ -42,6 +42,23 @@ def Row(stem, season, gid):
     return None
 
 
+def ModelSeries(season, gid):
+    """(snap time, our held-out in-game P(home)) per play from Backtest.InGameWP heldout_plays_<season>.jsonl."""
+    path = os.path.join("data", "backtest", "ingame_model", f"heldout_plays_{season}.jsonl")
+    if not os.path.exists(path):
+        return []
+    out = []
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            if gid not in line[:80]:
+                continue
+            r = json.loads(line)
+            t = Ts(r.get("time_of_day"))
+            if r.get("game_id") == gid and t and r.get("p_home_model") is not None:
+                out.append((t, r["p_home_model"]))
+    return sorted(out)
+
+
 def Scoring(season, gid):
     out = []
     with open(os.path.join("data", "playbyplay", f"pbp_{season}.jsonl"), encoding="utf-8") as fh:
@@ -72,7 +89,12 @@ def Plot(gid, out_dir):
         if ser:
             ax.step([(t - k0) / 60 for t, _ in ser], [p for _, p in ser], where="post", color=color, lw=1.2, label=name)
             have.append(name)
-    ax.axhline(g["p_full2"], color="#2ca02c", lw=2, ls="-", label=f"our pregame model p_full2 = {g['p_full2']:.3f} (pregame only)")
+    mp = ModelSeries(season, gid)
+    if mp:
+        ax.step([(t - k0) / 60 for t, _ in mp], [p for _, p in mp], where="post", color="#2ca02c", lw=1.6,
+                label="our in-game model ingame_wp_v1 (held out, UNVALIDATED for betting)")
+        have.append("our in-game model")
+    ax.axhline(g["p_full2"], color="#2ca02c", lw=1, ls="--", label=f"our pregame model p_full2 = {g['p_full2']:.3f} (in-game prior)")
     ax.axhline(g["mkt_home"], color="black", lw=1, ls=":", label=f"closing line de-vigged = {g['mkt_home']:.3f}")
     for a, b in w["excluded"]:
         ax.axvspan((a - k0) / 60, (b - k0) / 60, color="grey", alpha=0.18, lw=0)
