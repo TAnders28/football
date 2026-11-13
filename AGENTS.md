@@ -42,6 +42,8 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: A
 | `Backtest/MarketBlend.py` | research: relative Ignorance (bits) of `p_full2_kmid_T60` vs Kalshi T-60, logistic market blend, blend bankroll (mid primary / ask secondary, tim_est_0.02), prototype YPP/SR ratings, light Kalshi totals/spreads survey. Simulation only; run when Tim approves |
 | `DataPull/PullKalshiThinMarkets.py` | Kalshi KXNFLSPREAD + KXNFLTOTAL 1-minute candles around kickoff (2025 and 2026-to-date) + series fee fields -> `data/kalshi/thin_*.jsonl` (public API, IPv4, resumable) |
 | `Backtest/ThinMarkets.py` | research: pre-registered favourite-longshot test on those totals/spreads vs moneylines at T-60, 2025 fit / 2026 holdout, ask+$0.02 primary and mid+$0.02 secondary, 95% widest CIs, $10k bankroll. Simulation only |
+| `DataPull/BuildTeamGameEff.py` | compact team-game EPA/SR/YPP tables from local pbp JSONL or nflreadpy -> `data/backtest/team_game_eff_<season>.jsonl` (resumable) |
+| `Backtest/ResidualSearch.py` | research: residual-on-market walk-forward search (offset logistic vs book close, 2,560-config grid, SPA / permutation, Kalshi T-60 apply of the frozen config). Simulation only |
 | `Backtest/SnapshotRunner.py` | scheduled entry for the price-capture tasks: single-instance lock, quiet logs to `data/logs/snapshots/` |
 | `Backtest/Calibration.py` | Brier / log loss / reliability bins of walk-forward models vs the de-vigged closing market (evaluation only) |
 | `Backtest/AssessLive.py`, `LiveReadiness.py`, `LiveFile.py` | one-shot read-only live odds/game state + Degen's live file |
@@ -97,6 +99,8 @@ Creates `.venv` with `py -3.14` if missing, installs pinned deps from `requireme
 .venv\Scripts\python.exe -m Backtest.MarketBlend [--out-dir DIR] [--skip-ratings] [--skip-survey] [--ratings-only] [--survey-only]  # LSE-style market blend study; do not run until Tim approves
 .venv\Scripts\python.exe -m DataPull.PullKalshiThinMarkets [--seasons 2025,2026] [--series KXNFLSPREAD,KXNFLTOTAL]  # totals/spreads candles; IPv4, resumable
 .venv\Scripts\python.exe -m Backtest.ThinMarkets [--out-dir DIR] [--skip-pull]  # thin-markets FLB test; do not run until Tim approves
+.venv\Scripts\python.exe -m DataPull.BuildTeamGameEff [--first 2014 --last 2026]  # team-game efficiency tables for residual search
+.venv\Scripts\python.exe -m Backtest.ResidualSearch [--out-dir DIR] [--workers N]  # residual-on-market search; do not run until Tim approves
 .venv\Scripts\python.exe -m Backtest.SnapshotPrices --week auto --label adhoc
 .venv\Scripts\python.exe -m unittest discover -s tests
 ```
