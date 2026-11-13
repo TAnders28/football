@@ -12,7 +12,7 @@ from Backtest.MarketBlend import (
     BootstrapIgnRel, ClassifySeries, ClipP, DiscoverSeries, EdgeClaimable, FitBlend, FitRatingsModel,
     FrozenSeasonBlend, GrowthPerEvent, IgnRelBits, KalshiApi, LogLossBits, LogLossNats, LN2,
     MIN_RATING_PLAYS, PlaySuccess, PlayYards, PriorStdRatings, RATINGS_TRIALS, RatingsGain,
-    RunSurvey, SampleCandles, SeasonWeekFromTicker, SplitRows, SurveyCoverage, WidestRoi,
+    MarketCloseTs, RunSurvey, SampleCandles, SeasonWeekFromTicker, SplitRows, SurveyCoverage, WidestRoi,
 )
 
 
@@ -373,6 +373,59 @@ class SurveyTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["notes"], "series missing")
         self.assertEqual(rows[0]["n_markets"], 0)
+
+    def test_sample_candles_bounded_window_survives_http_400(self):
+        import io
+        import urllib.error
+        seen = []
+
+        class BoomApi:
+            calls = retries = 0
+
+            def Get(self, path, params=None):
+                seen.append(dict(params or {}))
+                raise urllib.error.HTTPError(path, 400, 'Bad Request', hdrs=None, fp=io.BytesIO())
+
+        n, lo, hi, ep, err = SampleCandles(
+            BoomApi(), 'KXNFLTOTAL', 'KXNFLTOTAL-25SEP07KCDEN-T45', 'historical',
+            market={'close_time': '2025-09-08T00:00:00Z'},
+        )
+        self.assertEqual(n, 0)
+        self.assertIsNone(lo)
+        self.assertIsNotNone(err)
+        self.assertIn('400', err)
+        self.assertTrue(seen)
+        span = seen[0]['end_ts'] - seen[0]['start_ts']
+        self.assertLessEqual(span, 8 * 24 * 3600)
+        self.assertGreater(seen[0]['start_ts'], 0)
+        self.assertNotEqual(seen[0]['period_interval'], 1)
+        close_ts = MarketCloseTs({'close_time': '2025-09-08T00:00:00Z'})
+        self.assertEqual(close_ts, 1757289600)
+
+    def test_sample_candles_retries_daily_after_hourly_400(self):
+        import io
+        import urllib.error
+        periods = []
+
+        class OnceApi:
+            calls = retries = 0
+
+            def Get(self, path, params=None):
+                periods.append((params or {}).get('period_interval'))
+                if (params or {}).get('period_interval') != 1440:
+                    raise urllib.error.HTTPError(path, 400, 'Bad Request', hdrs=None, fp=io.BytesIO())
+                return {'candlesticks': [{'end_period_ts': 1757289600}, {'end_period_ts': 1757293200}]}
+
+        n, lo, hi, ep, err = SampleCandles(
+            OnceApi(), 'KXNFLTOTAL', 'KXNFLTOTAL-25SEP07KCDEN-T45', 'live',
+            market={'close_time': '2025-09-08T00:00:00Z'},
+        )
+        self.assertEqual(n, 2)
+        self.assertIsNone(err)
+        self.assertEqual(periods, [60, 1440])
+        self.assertEqual(lo, 1757289600)
+        self.assertEqual(hi, 1757293200)
+
 
 
 if __name__ == "__main__":

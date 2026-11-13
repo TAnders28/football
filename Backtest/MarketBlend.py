@@ -594,12 +594,40 @@ def LoadGameStats(seasons, root="data"):
 # ----------------------------------------------------------------------------- Kalshi survey (network only when called with a live Api)
 
 
+def ForceIPv4():
+    """Tomputer's IPv6 route to Cloudflare can stall; prefer IPv4, as in the other pullers."""
+    import socket
+    if getattr(socket, '_football_ipv4', False):
+        return
+    _gai = socket.getaddrinfo
+    socket.getaddrinfo = lambda host, port, family=0, *a, **k: _gai(
+        host, port, socket.AF_INET if family == 0 else family, *a, **k)
+    socket._football_ipv4 = True
+
+
+def MarketCloseTs(market):
+    for k in ('close_time', 'expiration_time', 'expected_expiration_time',
+              'latest_expiration_time', 'open_time'):
+        v = (market or {}).get(k)
+        if v is None or v == '':
+            continue
+        try:
+            if isinstance(v, (int, float)):
+                return int(v)
+            return int(datetime.fromisoformat(str(v).replace('Z', '+00:00')).timestamp())
+        except (TypeError, ValueError, OSError):
+            continue
+    return None
+
+
 class KalshiApi:
     """Thin public-API client. Tests inject a fake with the same Get/Paged methods."""
 
     def __init__(self, pause=0.12, get=None):
         self.pause, self.calls, self.retries = pause, 0, 0
         self._get = get
+        if get is None:
+            ForceIPv4()
 
     def Get(self, path, params=None):
         if self._get is not None:
@@ -723,18 +751,50 @@ def CollectMarkets(api, series_ticker):
     return markets, tier
 
 
-def SampleCandles(api, series_ticker, ticker, tier, period=1):
-    """One light candle pull. Returns (n, first_ts, last_ts, endpoint) or zeros on miss."""
+def SampleCandles(api, series_ticker, ticker, tier, period=60, market=None, window_sec=7 * 24 * 3600):
+    """One light candle pull. Bounded window (Kalshi 400s a 1-min epoch-length range).
+
+    Returns (n, first_ts, last_ts, endpoint, error).
+    """
+    import urllib.error
     if tier == "historical":
         ep = f"/historical/markets/{ticker}/candlesticks"
     else:
         ep = f"/series/{series_ticker}/markets/{ticker}/candlesticks"
-    body = api.Get(ep, {"start_ts": 0, "end_ts": 2_000_000_000, "period_interval": period}) or {}
-    cs = body.get("candlesticks") or []
+    close_ts = MarketCloseTs(market)
+    if close_ts:
+        end_ts = close_ts + 3600
+        start_ts = max(0, end_ts - int(window_sec))
+    else:
+        now = int(datetime.now(timezone.utc).timestamp())
+        end_ts, start_ts = now, max(0, now - int(window_sec))
+    params = {"start_ts": int(start_ts), "end_ts": int(end_ts), "period_interval": period}
+    body, err = {}, None
+    try:
+        body = api.Get(ep, params) or {}
+    except urllib.error.HTTPError as exc:
+        err = f"HTTP {exc.code} period={period}"
+        if period != 1440:
+            try:
+                params = dict(params, period_interval=1440)
+                body = api.Get(ep, params) or {}
+                err = None
+            except urllib.error.HTTPError as exc2:
+                err = f"HTTP {exc2.code} period=1440 (also failed at {period})"
+                body = {}
+            except urllib.error.URLError as exc2:
+                err = f"{err}; retry 1440 URLError: {exc2}"
+                body = {}
+    except urllib.error.URLError as exc:
+        err = f"URLError: {exc}"
+        body = {}
+    if isinstance(body, dict) and body.get('error') and not (body.get('candlesticks') or []):
+        err = err or str(body.get('error'))
+    cs = (body or {}).get("candlesticks") or []
     if not cs:
-        return 0, None, None, ep
+        return 0, None, None, ep, err
     times = [int(c.get("end_period_ts") or 0) for c in cs if c.get("end_period_ts") is not None]
-    return len(cs), (min(times) if times else None), (max(times) if times else None), ep
+    return len(cs), (min(times) if times else None), (max(times) if times else None), ep, err
 
 
 def SurveyCoverage(series_map, markets_by_series, candle_samples):
@@ -787,7 +847,7 @@ def SurveyCoverage(series_map, markets_by_series, candle_samples):
                 "candle_tier": samp.get("tier") or "", "n_candles_sample": samp.get("n") or 0,
                 "candle_first_ts": samp.get("first_ts") or "", "candle_last_ts": samp.get("last_ts") or "",
                 "candle_endpoint": samp.get("endpoint") or "",
-                "notes": "candle sample",
+                "notes": ("candle sample" + (f"; {samp.get('error')}" if samp.get("error") else "")),
             })
     return rows
 
@@ -812,9 +872,9 @@ def RunSurvey(api, candidates=SURVEY_CANDIDATES, samples_per_series=3, kinds=("t
         candle_samples[ticker] = {}
         for m in picked:
             mt = m["ticker"]
-            n, lo, hi, ep = SampleCandles(api, ticker, mt, tier.get(mt, "live"))
+            n, lo, hi, ep, err = SampleCandles(api, ticker, mt, tier.get(mt, "live"), market=m)
             candle_samples[ticker][mt] = {"n": n, "first_ts": lo, "last_ts": hi, "endpoint": ep,
-                                          "tier": tier.get(mt, "")}
+                                          "tier": tier.get(mt, ""), "error": err or ""}
     rows = SurveyCoverage(series_map, markets_by_series, candle_samples)
     return {
         "series": {k: {kk: vv for kk, vv in v.items() if kk != "raw"} for k, v in series_map.items()},
@@ -1203,6 +1263,7 @@ def Main():
     ap.add_argument("--survey-samples", type=int, default=3)
     a = ap.parse_args()
     SetBelowNormal()
+    ForceIPv4()
     run_id = NewRunId()
     rng = np.random.default_rng(a.seed)
     os.makedirs(a.out_dir, exist_ok=True)
@@ -1220,7 +1281,16 @@ def Main():
     }
 
     if a.survey_only:
-        survey = RunSurvey(KalshiApi(), samples_per_series=a.survey_samples)
+        try:
+            survey = RunSurvey(KalshiApi(), samples_per_series=a.survey_samples)
+        except Exception as exc:
+            meta["survey_error"] = repr(exc)
+            meta["headline"] = "Kalshi totals/spreads survey failed; see survey_error."
+            with open(base + ".json", "w", encoding="utf-8") as fh:
+                json.dump(meta, fh, indent=1, default=str)
+            with open(base + ".md", "w", encoding="utf-8") as fh:
+                fh.write(MdReport(meta))
+            raise
         survey["md"] = SurveyMd(survey)
         meta["survey_summary"] = survey
         WriteCsv(base + "_survey.csv", SURVEY_FIELDS, survey["rows"])
@@ -1291,9 +1361,13 @@ def Main():
         meta["ratings"] = rat
     survey = None
     if not a.skip_survey:
-        survey = RunSurvey(KalshiApi(), samples_per_series=a.survey_samples)
-        survey["md"] = SurveyMd(survey)
-        meta["survey_summary"] = {k: survey[k] for k in ("series", "n_series", "n_markets", "http_calls", "http_retries", "md")}
+        try:
+            survey = RunSurvey(KalshiApi(), samples_per_series=a.survey_samples)
+            survey["md"] = SurveyMd(survey)
+            meta["survey_summary"] = {k: survey[k] for k in ("series", "n_series", "n_markets", "http_calls", "http_retries", "md")}
+        except Exception as exc:
+            meta["survey_error"] = repr(exc)
+            survey = None
 
     meta["headline"] = HeadlineFrom(meta)
 
