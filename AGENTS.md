@@ -40,6 +40,8 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: A
 | `Backtest/BankrollPlot.py` | shared framing for bankroll charts under Tim's season-axis rule (one season: first game to last game; multi-season: game-day index with a marker at each season boundary, no offseason flats). `Backtest/RenderBankrollCharts.py` re-renders AgentDocs drafts from existing CSVs |
 | `Backtest/CommonFormat.py` | emit the common cross-sport calibration, $10k bankroll and edges files (Degen plan 2026-11-13): walk-forward `p_full2_kmid_T60` vs Kalshi T-60 mid, plus optional book-close secondary. Simulation only |
 | `Backtest/MarketBlend.py` | research: relative Ignorance (bits) of `p_full2_kmid_T60` vs Kalshi T-60, logistic market blend, blend bankroll (mid primary / ask secondary, tim_est_0.02), prototype YPP/SR ratings, light Kalshi totals/spreads survey. Simulation only; run when Tim approves |
+| `DataPull/PullKalshiThinMarkets.py` | Kalshi KXNFLSPREAD + KXNFLTOTAL 1-minute candles around kickoff (2025 and 2026-to-date) + series fee fields -> `data/kalshi/thin_*.jsonl` (public API, IPv4, resumable) |
+| `Backtest/ThinMarkets.py` | research: pre-registered favourite-longshot test on those totals/spreads vs moneylines at T-60, 2025 fit / 2026 holdout, ask+$0.02 primary and mid+$0.02 secondary, 95% widest CIs, $10k bankroll. Simulation only |
 | `Backtest/SnapshotRunner.py` | scheduled entry for the price-capture tasks: single-instance lock, quiet logs to `data/logs/snapshots/` |
 | `Backtest/Calibration.py` | Brier / log loss / reliability bins of walk-forward models vs the de-vigged closing market (evaluation only) |
 | `Backtest/AssessLive.py`, `LiveReadiness.py`, `LiveFile.py` | one-shot read-only live odds/game state + Degen's live file |
@@ -93,6 +95,8 @@ Creates `.venv` with `py -3.14` if missing, installs pinned deps from `requireme
 .venv\Scripts\python.exe -m Backtest.RenderBankrollCharts   # re-render bankroll drafts from existing AgentDocs CSVs (no resim)
 .venv\Scripts\python.exe -m Backtest.CommonFormat [--cal-dir DIR --bank-dir DIR]  # common calibration + $10k bankroll CSVs
 .venv\Scripts\python.exe -m Backtest.MarketBlend [--out-dir DIR] [--skip-ratings] [--skip-survey] [--ratings-only] [--survey-only]  # LSE-style market blend study; do not run until Tim approves
+.venv\Scripts\python.exe -m DataPull.PullKalshiThinMarkets [--seasons 2025,2026] [--series KXNFLSPREAD,KXNFLTOTAL]  # totals/spreads candles; IPv4, resumable
+.venv\Scripts\python.exe -m Backtest.ThinMarkets [--out-dir DIR] [--skip-pull]  # thin-markets FLB test; do not run until Tim approves
 .venv\Scripts\python.exe -m Backtest.SnapshotPrices --week auto --label adhoc
 .venv\Scripts\python.exe -m unittest discover -s tests
 ```
