@@ -35,6 +35,7 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: A
 | `Backtest/InGameWP.py` | research: in-game win-probability model ingame_wp_v1 (pre-play state + pregame prior, standardized logistic, walk-forward by season) -> `data/models/ingame_wp_*.json`. UNVALIDATED for betting (2026-11-13: slightly worse than both markets) |
 | `Backtest/InGameModelEval.py` | research: held-out in-game model vs Kalshi/Polymarket on the same 1-min samples (calibration, Brier/log loss/ECE by quarter/season, mismatch P&L at mid after fees) |
 | `Backtest/LiveInGame.py` | live read for one game: ESPN state -> our UNVALIDATED in-game p next to AssessLive Kalshi/Polymarket book, fee-adjusted edge, appended to Degen's live file; action always PASS until VALIDATED (not scheduled) |
+| `Backtest/InGameRuleSim.py` | research/simulation: 13 pre-fixed in-game rules (close-game gap, early swings follow/fade, home 30-50 fade) on Kalshi 1-min held-out data, mid/taker fills, Tim's fee est + Kalshi verified fee, flat + quarter-Kelly bankrolls, PathSim. All PASS 2026-11-13 |
 | `Backtest/PathSim.py` | seeded randomized paths for day-level strategies: random start, block bootstrap, shuffle, restarts after ruin / bad start; P(ruin), P($1M), quantiles. `StakingEnv.RandomIdx` gives the same orders as `idx` |
 | `Backtest/SnapshotRunner.py` | scheduled entry for the price-capture tasks: single-instance lock, quiet logs to `data/logs/snapshots/` |
 | `Backtest/Calibration.py` | Brier / log loss / reliability bins of walk-forward models vs the de-vigged closing market (evaluation only) |
@@ -85,6 +86,7 @@ Creates `.venv` with `py -3.14` if missing, installs pinned deps from `requireme
 .venv\Scripts\python.exe -m Backtest.InGameWP [--select]
 .venv\Scripts\python.exe -m Backtest.InGameModelEval
 .venv\Scripts\python.exe -m Backtest.LiveInGame --game 2026_10_LAC_BAL [--state-json FILE --live-root DIR --no-file]
+.venv\Scripts\python.exe -m Backtest.InGameRuleSim [--paths 5000 --seed 20261113]
 .venv\Scripts\python.exe -m Backtest.SnapshotPrices --week auto --label adhoc
 .venv\Scripts\python.exe -m unittest discover -s tests
 ```
