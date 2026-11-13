@@ -211,6 +211,7 @@ def Charts(summary, curves, path_bar, path_eq):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from Backtest.BankrollPlot import FrameBankroll, PlotBankroll
     names = list(summary)
     fig, ax = plt.subplots(figsize=(14, 7))
     combos = [("mid", "tim_est_0.02", "#9467bd"), ("taker", "tim_est_0.02", "#ff7f0e"), ("taker", "kalshi_verified", "#1f77b4")]
@@ -228,16 +229,19 @@ def Charts(summary, curves, path_bar, path_eq):
     fig.savefig(path_bar, dpi=130, bbox_inches="tight"); plt.close(fig)
     fig, axes = plt.subplots(1, 2, figsize=(15, 6), sharey=False)
     for ax, stake in zip(axes, ("flat", "qkelly")):
+        dates, equity, series = [], [], []
         for n in names:
             c = curves.get(f"{n}|taker|kalshi_verified|{stake}") or []
-            if c:
-                ax.plot(range(len(c)), [r["equity"] for r in c], lw=1.2, label=n)
-        ax.axhline(START, color="black", lw=0.8)
-        ax.set_title(f"Continuous $10k, {'flat $200/bet' if stake == 'flat' else 'quarter Kelly (cap 5%)'}; taker fill + Kalshi verified fee", fontsize=10)
-        ax.set_xlabel("game day with a bet (2025 -> 2026 wk9)"); ax.set_ylabel("bank ($)"); ax.grid(alpha=0.3)
-    axes[0].legend(fontsize=6.5, ncol=2)
+            dates.extend(r["date"] for r in c)
+            equity.extend(r["equity"] for r in c)
+            series.extend([n] * len(c))
+        frame = FrameBankroll(dates, equity, series, mode="auto")
+        title = f"Continuous $10k, {'flat $200/bet' if stake == 'flat' else 'quarter Kelly (cap 5%)'}; taker fill + Kalshi verified fee"
+        PlotBankroll(frame, ax=ax, title=title, ylabel="bank ($)",
+                     hlines=[(START, "", {"color": "black", "lw": 0.8, "ls": "-", "alpha": 0.8})],
+                     legend={"fontsize": 6.5, "ncol": 2} if stake == "flat" else False)
+    fig.tight_layout()
     fig.savefig(path_eq, dpi=130, bbox_inches="tight"); plt.close(fig)
-
 
 def Main():
     ap = argparse.ArgumentParser()
