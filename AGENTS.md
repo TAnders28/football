@@ -20,6 +20,9 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: A
 | `Backtest/MillionTarget.py` | research: P(hit $1M) vs P(ruin) sizing frontier on the continuous $10k bank (day-reserved cash, stop-at-target, day-block bootstrap, nested comparator, Compound mechanics audit). Not live |
 | `Backtest/CandidateConfigs.py` | candidate sizing configs, NOT wired into PredictDay; adopting one = new frozen config + new holdout |
 | `Backtest/StakingEnv.py`, `Backtest/RlStaking.py` | research: learned day-level staking policy (CEM over a contextual Kelly/parlay policy), walk-forward 2019-24 + one-time 2025-26 holdout (`data/backtest/rl/HOLDOUT_USED.json`). Sim only, not live |
+| `DataPull/PullPregame.py` | nflverse injury reports, PFR snap counts, depth charts, player id crosswalk -> `data/injuries|snaps|depth/<season>.jsonl`, `data/players/players.jsonl` |
+| `Backtest/InjuryFeatures.py`, `Backtest/InjuryTest.py` | research: leak-free team-game Out/Doubtful/Questionable features weighted by LAGGED snap share; walk-forward test vs p_full2 (did not help on top of the closing line, 2026-11-13). Not live |
+| `Backtest/SnapshotPrices.py` | one-shot read-only executable moneyline snapshot (Kalshi + Polymarket books: bid/ask, size, source vs fetch time) -> append-only `data/prices/snapshots_<season>.jsonl`. No schedule |
 | `Backtest/Calibration.py` | Brier / log loss / reliability bins of walk-forward models vs the de-vigged closing market (evaluation only) |
 | `Backtest/AssessLive.py`, `LiveReadiness.py`, `LiveFile.py` | one-shot read-only live odds/game state + Degen's live file |
 | `PlayByPlay/` | play-by-play reconstruction/simulation. Kept separate from `Backtest/` |
@@ -52,6 +55,10 @@ Creates `.venv` with `py -3.14` if missing, installs pinned deps from `requireme
 .venv\Scripts\python.exe PlayByPlay\DriveCheck.py --season 2026 [--out-dir DIR --base NAME]
 .venv\Scripts\python.exe PlayByPlay\TeamEfficiency.py --season 2026 [--out-dir DIR --base NAME]
 .venv\Scripts\python.exe -m Backtest.AssessLive --date YYYY-MM-DD [--matchup TB@CHI] [--live-dir DIR] [--no-live-file]
+.venv\Scripts\python.exe -m DataPull.PullPregame --first 2012 --last 2026
+.venv\Scripts\python.exe -m Backtest.InjuryFeatures --first 2013 --last 2026
+.venv\Scripts\python.exe -m Backtest.InjuryTest [--out-dir DIR --base NAME]
+.venv\Scripts\python.exe -m Backtest.SnapshotPrices --season 2026 --week N [--label T-90m]
 .venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
