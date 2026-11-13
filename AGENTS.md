@@ -23,6 +23,10 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: A
 | `DataPull/PullPregame.py` | nflverse injury reports, PFR snap counts, depth charts, player id crosswalk -> `data/injuries|snaps|depth/<season>.jsonl`, `data/players/players.jsonl` |
 | `Backtest/InjuryFeatures.py`, `Backtest/InjuryTest.py` | research: leak-free team-game Out/Doubtful/Questionable features weighted by LAGGED snap share; walk-forward test vs p_full2 (did not help on top of the closing line, 2026-11-13). Not live |
 | `Backtest/SnapshotPrices.py` | one-shot read-only executable moneyline snapshot (Kalshi + Polymarket books: bid/ask, size, source vs fetch time) -> append-only `data/prices/snapshots_<season>.jsonl`. No schedule |
+| `DataPull/PullKalshiHistory.py` | Kalshi KXNFLGAME 1-minute bid/ask candles around kickoff (2025 preseason on) -> `data/kalshi/nflgame_candles_<season>.jsonl` (public API) |
+| `Backtest/KalshiReality.py` | research: frozen rule priced at Kalshi executable ask at T-90/T-15 vs closing line, Tim's fee estimate and the verified Kalshi taker fee, plus PathSim distributions. Not live |
+| `Backtest/PathSim.py` | seeded randomized paths for day-level strategies: random start, block bootstrap, shuffle, restarts after ruin / bad start; P(ruin), P($1M), quantiles. `StakingEnv.RandomIdx` gives the same orders as `idx` |
+| `Backtest/SnapshotRunner.py` | scheduled entry for the price-capture tasks: single-instance lock, quiet logs to `data/logs/snapshots/` |
 | `Backtest/Calibration.py` | Brier / log loss / reliability bins of walk-forward models vs the de-vigged closing market (evaluation only) |
 | `Backtest/AssessLive.py`, `LiveReadiness.py`, `LiveFile.py` | one-shot read-only live odds/game state + Degen's live file |
 | `PlayByPlay/` | play-by-play reconstruction/simulation. Kept separate from `Backtest/` |
@@ -59,6 +63,9 @@ Creates `.venv` with `py -3.14` if missing, installs pinned deps from `requireme
 .venv\Scripts\python.exe -m Backtest.InjuryFeatures --first 2013 --last 2026
 .venv\Scripts\python.exe -m Backtest.InjuryTest [--out-dir DIR --base NAME]
 .venv\Scripts\python.exe -m Backtest.SnapshotPrices --season 2026 --week N [--label T-90m]
+.venv\Scripts\python.exe -m DataPull.PullKalshiHistory --seasons 2025,2026
+.venv\Scripts\python.exe -m Backtest.KalshiReality [--out-dir DIR --base NAME --paths 5000 --seed 20261113]
+.venv\Scripts\python.exe -m Backtest.SnapshotPrices --week auto --label adhoc
 .venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
@@ -89,3 +96,21 @@ Creates `.venv` with `py -3.14` if missing, installs pinned deps from `requireme
 - **Git.** Local only on Tim's machine. No cloud agents/VMs. Commit code + docs only (`git diff --cached
   --stat`). **Push only when Tim says so in his own words**; relays from other bots don't count. No
   force-push, history rewrite or branch deletion.
+
+## Price-capture schedule (Windows Task Scheduler, approved by Tim 2026-11-13)
+
+Four current-user tasks (no elevation, run only while Tim is logged on, MultipleInstances=IgnoreNew, 20 min limit, plus a
+file lock so runs never overlap). Each runs `.venv\Scripts\pythonw.exe -m Backtest.SnapshotRunner --label <label>` in
+`E:\Football\football` (no window), appends to `data/prices/snapshots_<season>.jsonl`, and logs to `data/logs/snapshots/<date>.log`.
+Tomputer is on Pacific time; triggers are local (PT) = the ET slots minus 3 h:
+
+| task | label | triggers (PT) | ET intent |
+|---|---|---|---|
+| Footbot-Snapshot-Open | open | Tue 07:00 | Tue 10:00 opening prices |
+| Footbot-Snapshot-PostInjury | post_injury | Fri 14:00 | Fri 17:00 after final injury reports |
+| Footbot-Snapshot-T90 | T-90 | Sun 05:00, 08:30, 11:35, 15:50; Mon+Thu 15:45 | 90 min before the 9:30 / 1:00 / 4:05 / 8:20 Sunday windows and 8:15 TNF/MNF |
+| Footbot-Snapshot-T15 | T-15 | Sun 06:15, 09:45, 12:50, 17:05; Mon+Thu 17:00 | 15 min before the same windows |
+
+Not covered: Saturday games (late season), Thanksgiving / Christmas specials. Check: `Get-ScheduledTask -TaskName "Footbot-Snapshot-*"`.
+**Disable:** `Get-ScheduledTask -TaskName "Footbot-Snapshot-*" | Disable-ScheduledTask` (re-enable with `Enable-ScheduledTask`).
+**Remove:** `Get-ScheduledTask -TaskName "Footbot-Snapshot-*" | Unregister-ScheduledTask -Confirm:$false`.

@@ -4,7 +4,8 @@ One-shot, read-only snapshot of EXECUTABLE pre-game NFL moneyline prices (Kalshi
     .venv\Scripts\python.exe -m Backtest.SnapshotPrices --season 2026 --week 10 [--label T-24h] [--out-dir data\prices]
 
 Appends one row per venue x market side to  <out-dir>/snapshots_<season>.jsonl  (append-only, never rewritten) and
-writes a per-run summary  <out-dir>/snapshot_<season>_w<week>_<UTC stamp>.md/.json.
+(--week auto picks the week of the next unstarted game; scheduled runs use Backtest.SnapshotRunner)
+and writes a per-run summary  <out-dir>/snapshot_<season>_w<week>_<UTC stamp>.md/.json.
 
 Row fields: run_id, capture_label, fetched_at (UTC, this process's clock), season, week, game_id, away, home,
 kickoff_utc, minutes_to_kickoff, venue, market_id, side_team, best_bid, bid_size, best_ask, ask_size, mid, spread,
@@ -174,24 +175,47 @@ def SummaryMarkdown(out):
     return "\n".join(lines) + "\n"
 
 
-def Main():
-    ap = argparse.ArgumentParser(description="One-shot executable NFL moneyline snapshot (read-only).")
-    ap.add_argument("--season", type=int, default=2026)
-    ap.add_argument("--week", type=int, required=True)
-    ap.add_argument("--label", default="adhoc")
-    ap.add_argument("--out-dir", default=os.path.join("data", "prices"))
-    a = ap.parse_args()
-    out = Snapshot(a.season, a.week, a.label)
-    os.makedirs(a.out_dir, exist_ok=True)
-    with open(os.path.join(a.out_dir, f"snapshots_{a.season}.jsonl"), "a", encoding="utf-8") as fh:
+def AutoSeasonWeek(now=None, season=None):
+    """Season = this year from March on, else last year. Week = the week of the next game not yet kicked off."""
+    now = now or datetime.now(timezone.utc)
+    season = season or (now.year if now.month >= 3 else now.year - 1)
+    upcoming = [g for g in LoadSeason(season) if Kickoff(g) > now]
+    if not upcoming:
+        return season, None
+    return season, min(int(g["week"]) for g in upcoming)
+
+
+def WriteOutputs(out, out_dir):
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, f"snapshots_{out['season']}.jsonl"), "a", encoding="utf-8") as fh:
         for r in out["rows"]:
             fh.write(json.dumps(r, default=str) + "\n")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    base = os.path.join(a.out_dir, f"snapshot_{a.season}_w{a.week}_{stamp}")
+    base = os.path.join(out_dir, f"snapshot_{out['season']}_w{out['week']}_{stamp}")
     with open(base + ".json", "w", encoding="utf-8") as fh:
         json.dump(out, fh, indent=1, default=str)
     with open(base + ".md", "w", encoding="utf-8") as fh:
         fh.write(SummaryMarkdown(out))
+    return base
+
+
+def Main():
+    ap = argparse.ArgumentParser(description="One-shot executable NFL moneyline snapshot (read-only).")
+    ap.add_argument("--season", default="auto")
+    ap.add_argument("--week", default="auto", help="week number or 'auto' (week of the next unstarted game)")
+    ap.add_argument("--label", default="adhoc")
+    ap.add_argument("--out-dir", default=os.path.join("data", "prices"))
+    a = ap.parse_args()
+    season = None if a.season == "auto" else int(a.season)
+    if a.week == "auto":
+        season, week = AutoSeasonWeek(season=season)
+        if week is None:
+            print("no upcoming games for season", season)
+            return
+    else:
+        season, week = season or AutoSeasonWeek()[0], int(a.week)
+    out = Snapshot(season, week, a.label)
+    base = WriteOutputs(out, a.out_dir)
     print(SummaryMarkdown(out))
     print("wrote", base + ".md")
 

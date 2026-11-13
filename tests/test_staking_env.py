@@ -1,4 +1,4 @@
-﻿"""StakingEnv: pre-game state (no outcome leak), payouts on both bases, parlay voids, exposure cap,
+"""StakingEnv: pre-game state (no outcome leak), payouts on both bases, parlay voids, exposure cap,
 absorbing target/ruin, synthetic outcomes, train-only calibration, constant baselines (synthetic data)."""
 
 import copy
@@ -121,6 +121,14 @@ class StakingEnvTests(unittest.TestCase):
         p2["W"][~mask] *= -1
         np.testing.assert_allclose(w1, SE.CalibFit(p2, mask))
 
+
+class RandomIdxTests(unittest.TestCase):
+    def test_random_idx_seeded_and_bounded(self):
+        from Backtest.StakingEnv import RandomIdx
+        a = RandomIdx(30, 5, 40, "random_start", seed=3)
+        self.assertEqual(a.shape, (5, 40))
+        self.assertTrue((a < 30).all())
+        self.assertTrue((a == RandomIdx(30, 5, 40, "random_start", seed=3)).all())
 
 if __name__ == "__main__":
     unittest.main()

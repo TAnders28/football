@@ -236,3 +236,12 @@ def Objective(res, kind):
     if kind == "growth":
         return lw
     return res["hit"].astype(float) + 0.05 * lw / math.log(TARGET / START)
+
+
+# ----------------------------------------------------------------------------- randomized day orders (PathSim)
+def RandomIdx(n_days, paths, steps, method="block_bootstrap", seed=20261113, block=4):
+    """(paths, steps) day-index array for Simulate(pack, idx, ...): random start dates, block-bootstrapped or shuffled
+    game-day order (Backtest.PathSim.DayOrders). Seeded. For restarts after ruin / a bad start, call Simulate in
+    segments with `state` or score daily returns with Backtest.PathSim.RunPaths(restart=True)."""
+    from Backtest.PathSim import DayOrders
+    return DayOrders(n_days, paths, steps, method, np.random.default_rng(seed), block)
