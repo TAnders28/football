@@ -121,8 +121,8 @@ def KalshiPick(r, p2, p3, q, fee_fn, bank):
     return None
 
 
-def KalshiWalk(rows, tkey, variant, fee_name):
-    fee_fn = FEES[fee_name]
+def KalshiWalk(rows, tkey, variant, fee_name, fee_fn=None):
+    fee_fn = fee_fn or FEES[fee_name]
     rows = sorted(rows, key=lambda r: (r["gameday"], r.get("gametime") or "", r["game_id"]))
     bank, peak, bets, daily = START, START, [], []
     for day, grp in groupby(rows, key=lambda r: r["gameday"]):

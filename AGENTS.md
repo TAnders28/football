@@ -25,6 +25,8 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: A
 | `Backtest/SnapshotPrices.py` | one-shot read-only executable moneyline snapshot (Kalshi + Polymarket books: bid/ask, size, source vs fetch time) -> append-only `data/prices/snapshots_<season>.jsonl`. No schedule |
 | `DataPull/PullKalshiHistory.py` | Kalshi KXNFLGAME 1-minute bid/ask candles around kickoff (2025 preseason on) -> `data/kalshi/nflgame_candles_<season>.jsonl` (public API) |
 | `Backtest/KalshiReality.py` | research: frozen rule priced at Kalshi executable ask at T-90/T-15 vs closing line, Tim's fee estimate and the verified Kalshi taker fee, plus PathSim distributions. Not live |
+| `DataPull/PullPolymarketHistory.py` | Polymarket NFL game moneyline price history (Gamma events tag 450 + CLOB /prices-history, kickoff-6h..+5min, 1-min) -> `data/prices/polymarket_history_<season>.jsonl` (2024 on; public API) |
+| `Backtest/PolyReality.py` | research: frozen rule filled at the Polymarket history price (mid; Tim's fill assumption) at T-90/T-15, Tim's fee estimate and Polymarket sports fee 0.05*p*(1-p), plus PathSim. Not live |
 | `Backtest/PathSim.py` | seeded randomized paths for day-level strategies: random start, block bootstrap, shuffle, restarts after ruin / bad start; P(ruin), P($1M), quantiles. `StakingEnv.RandomIdx` gives the same orders as `idx` |
 | `Backtest/SnapshotRunner.py` | scheduled entry for the price-capture tasks: single-instance lock, quiet logs to `data/logs/snapshots/` |
 | `Backtest/Calibration.py` | Brier / log loss / reliability bins of walk-forward models vs the de-vigged closing market (evaluation only) |
@@ -65,6 +67,8 @@ Creates `.venv` with `py -3.14` if missing, installs pinned deps from `requireme
 .venv\Scripts\python.exe -m Backtest.SnapshotPrices --season 2026 --week N [--label T-90m]
 .venv\Scripts\python.exe -m DataPull.PullKalshiHistory --seasons 2025,2026
 .venv\Scripts\python.exe -m Backtest.KalshiReality [--out-dir DIR --base NAME --paths 5000 --seed 20261113]
+.venv\Scripts\python.exe -m DataPull.PullPolymarketHistory   # forces IPv4 (Tomputer IPv6 to Cloudflare stalls)
+.venv\Scripts\python.exe -m Backtest.PolyReality [--out-dir DIR --base NAME --paths 5000 --seed 20261113]
 .venv\Scripts\python.exe -m Backtest.SnapshotPrices --week auto --label adhoc
 .venv\Scripts\python.exe -m unittest discover -s tests
 ```
