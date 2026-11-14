@@ -14,7 +14,7 @@ def _game(**kw):
     g = {"game_id": "2026_10_NE_DET", "start_time": "2026-11-15T09:30:00-05:00", "home": "DET", "away": "NE",
          "status": "scheduled", "score": None,
          "market": {"home_yes_ask": 0.58, "away_yes_ask": 0.43, "open_home_yes": 0.53, "source": "Kalshi", "as_of": "x"},
-         "model": {"home_win_prob": 0.594, "model_name": B.MODEL, "tested": True},
+         "model": {"home_win_prob": 0.594, "model_name": B.MODEL, "tested": False},
          "edge_home_c": B.EdgeC(0.594, 0.58), "edge_away_c": B.EdgeC(1 - 0.594, 0.43),
          "context": {"injuries": [{"team": "DET", "player": "X", "status": "Out", "note": None}], "recent_form": None,
                      "rest_days": None, "head_to_head": None, "notes": [B.MODEL_NOTE]},
@@ -25,7 +25,7 @@ def _game(**kw):
 
 
 def _board(games):
-    return {"sport": "nfl", "generated_at": "2026-11-14T18:00:00-05:00", "games": games}
+    return {"sport": "NFL", "generated_at": "2026-11-14T18:00:00-05:00", "games": games}
 
 
 def test_edge_formula():
@@ -47,6 +47,12 @@ def test_validate_ok_and_failures():
     b = _board([_game()]); b["generated_at"] = "2026-11-14T23:00:00Z"
     with T.assertRaises(ValueError):
         B.Validate(b)
+    b = _board([_game()]); b["sport"] = "nfl"
+    with T.assertRaises(ValueError):
+        B.Validate(b)
+    bad = _game(); bad["model"]["tested"] = True
+    with T.assertRaises(ValueError):
+        B.Validate(_board([bad]))
 
 
 def test_nulls_allowed():
