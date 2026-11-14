@@ -25,9 +25,15 @@ For a sportsbook ticket the vig is already in the price; fee lines are shown for
 """
 from __future__ import annotations
 
+import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
 import argparse
 import json
-import os
 import re
 from datetime import datetime
 
@@ -287,6 +293,9 @@ def Main(argv=None):
     ap.add_argument("--out-dir", default=OUT_DIR)
     ap.add_argument("--no-save", action="store_true")
     a = ap.parse_args(argv)
+    if a.slip:
+        a.slip = os.path.abspath(a.slip)
+    os.chdir(ROOT)  # data/ paths are repo-relative
     spec = {}
     if a.slip:
         txt = open(a.slip, encoding="utf-8").read()

@@ -15,9 +15,15 @@ Unknown values print as "n/a"; nothing is invented.
 """
 from __future__ import annotations
 
+import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
 import argparse
 import json
-import os
 import re
 import time
 from datetime import datetime
@@ -341,6 +347,7 @@ def Main(argv=None):
     ap.add_argument("--game", help="substring filter on the ESPN game name, e.g. 'Texas A&M' or 'DET'")
     ap.add_argument("--out-root", default=OUT_ROOT)
     a = ap.parse_args(argv)
+    os.chdir(ROOT)  # data/ paths are repo-relative
     res, out = Build(a.league, a.date, a.out_root, a.game)
     print(f"cheat sheet {a.league} {a.date}: {len(res['games'])} games, {res['runtime_s']}s, errors {len(res['errors'])}")
     print(os.path.join(out, "slate.md"))

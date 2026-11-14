@@ -13,9 +13,15 @@ ESPN win % comes from the scoreboard situation; if missing, from the game summar
 """
 from __future__ import annotations
 
+import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
 import argparse
 import json
-import os
 import time
 from datetime import datetime
 
@@ -105,6 +111,7 @@ def Main(argv=None):
     ap.add_argument("--no-kalshi", action="store_true")
     ap.add_argument("--out-dir", default=OUT_DIR)
     a = ap.parse_args(argv)
+    os.chdir(ROOT)  # data/ paths are repo-relative
     n = 0
     while True:
         snap = Snapshot(a.league, a.date, a.game, a.all, not a.no_kalshi)
