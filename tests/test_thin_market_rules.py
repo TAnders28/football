@@ -207,5 +207,26 @@ class DsrAndCoverageTests(unittest.TestCase):
         self.assertEqual(CoverageGaps([]), ["2025 candles", "2026 candles", "KXNFLSPREAD", "KXNFLTOTAL"])
 
 
+
+    def test_edges_for_walk_have_walk_keys(self):
+        from Backtest.ThinMarketRules import EdgesForWalk
+        from Backtest.CommonFormat import Walk
+        bets = [{
+            "date": "2026-09-10", "start_time": None, "sport": "nfl",
+            "season": "2026", "split": "forward", "event_id": "g1",
+            "event": "ARI @ SF", "side": "no", "ticker": "t",
+            "model": "thin_rule_2025", "price_basis": "kalshi_T120_mid",
+            "model_prob": None, "market_prob_devig": 0.32, "fill": 0.32,
+            "edge": 1 - 0.32 - 0.02, "result": 1, "fee_kind": "tim",
+            "width": 0.04, "volume": None, "open_interest": None,
+            "would_fill": True, "kind": "spread", "strike": 3.0,
+        }]
+        edges = EdgesForWalk(bets, "tim", p_frozen=0.61)
+        self.assertEqual(edges[0]["_fill"], 0.32)
+        self.assertAlmostEqual(edges[0]["_p"], 0.61)
+        daily, blog, ruined, end = Walk(edges, "flat100", fee_kind="tim", days=["2026-09-10"])
+        self.assertEqual(len(blog), 1)
+        self.assertFalse(ruined)
+
 if __name__ == "__main__":
     unittest.main()

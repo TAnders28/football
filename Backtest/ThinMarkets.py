@@ -89,9 +89,14 @@ def IterJsonl(path):
     if not os.path.exists(path):
         return
     with open(path, encoding="utf-8") as fh:
-        for line in fh:
-            if line.strip():
+        for i, line in enumerate(fh, 1):
+            if not line.strip():
+                continue
+            try:
                 yield json.loads(line)
+            except json.JSONDecodeError:
+                print(f"skipping bad jsonl line {i} in {path}", flush=True)
+                continue
 
 
 def LoadMarkets(root="data"):
@@ -917,6 +922,8 @@ def Main():
     ap.add_argument("--out-dir", default=r"E:\AgentDocs\American-Footbot\2026-11-13_thin-markets")
     ap.add_argument("--base", default="2026-11-13_thin-markets")
     ap.add_argument("--skip-pull", action="store_true")
+    ap.add_argument("--data-root", default="data",
+                    help="directory that contains kalshi/thin_*.jsonl (moneyline candles still use data/)")
     ap.add_argument("--skip-rules", action="store_true",
                     help="skip the model-free rule search (original FLB study only)")
     ap.add_argument("--normal", action="store_true", help="leave process at Normal priority")
@@ -944,9 +951,9 @@ def Main():
             argv += ["--limit", str(a.pull_limit)]
         pull_summary = PullMain(argv)
 
-    fees = LoadFees()
-    markets = LoadMarkets()
-    entries = LoadThinEntries()
+    fees = LoadFees(root=a.data_root)
+    markets = LoadMarkets(root=a.data_root)
+    entries = LoadThinEntries(root=a.data_root)
     line_rows, drop_lines = ContractRows(entries, markets, kinds=("total", "spread"))
     ml_rows, drop_ml = MoneylineRows()
     # Keep 2026 completed games only (those with a result already required).

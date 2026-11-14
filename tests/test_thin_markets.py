@@ -262,5 +262,18 @@ class PullerResumeTests(unittest.TestCase):
             self.assertNotIn("B", retry)
 
 
+
+    def test_iter_jsonl_skips_bad_line(self):
+        import os, tempfile
+        from Backtest.ThinMarkets import IterJsonl
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "t.jsonl")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write('{"ticker": "A"}\n')
+                fh.write("{not-json\n")
+                fh.write('{"ticker": "B"}\n')
+            rows = list(IterJsonl(path))
+            self.assertEqual([r["ticker"] for r in rows], ["A", "B"])
+
 if __name__ == "__main__":
     unittest.main()

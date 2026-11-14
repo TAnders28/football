@@ -598,10 +598,12 @@ def EdgesForWalk(bets, fee_kind="tim", p_frozen=None):
         e["edge"] = b["result"] - fill - fee
         e["qualifies"] = True
         e["fee"] = fee
-        if p_frozen is not None:
-            e["model_prob"] = float(p_frozen)
-        elif e.get("model_prob") is None:
-            e["model_prob"] = float(fill)
+        p = float(p_frozen) if p_frozen is not None else float(fill)
+        e["model_prob"] = p
+        e["_p"] = p
+        e["_fill"] = fill
+        e["_fav_fill"] = fill
+        e["_fav_result"] = int(b["result"])
         out.append(e)
     return out
 
