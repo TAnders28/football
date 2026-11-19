@@ -29,3 +29,7 @@ Thumbs.db
 # Hand-picked example outputs for reading (small, tracked)
 !/examples/
 !/examples/*.json
+
+# Local scratch and example outputs (kept untracked by Tim's rule)
+examples/
+logs/
