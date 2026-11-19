@@ -152,3 +152,8 @@ Tomputer is on Pacific time; triggers are local (PT) = the ET slots minus 3 h:
 Not covered: Saturday games (late season), Thanksgiving / Christmas specials. Check: `Get-ScheduledTask -TaskName "Footbot-Snapshot-*"`.
 **Disable:** `Get-ScheduledTask -TaskName "Footbot-Snapshot-*" | Disable-ScheduledTask` (re-enable with `Enable-ScheduledTask`).
 **Remove:** `Get-ScheduledTask -TaskName "Footbot-Snapshot-*" | Unregister-ScheduledTask -Confirm:$false`.
+
+## Daily check reporting (Tim, 2026-11-19)
+- Scheduled daily checks (the scheduled daily check / price-capture review) stay quiet unless an edge clears the fee-adjusted threshold.
+- Log every run, including no-edge days (NO_GAMES, PASS), to `E:\AgentDocs\American-Footbot\daily-check\<YYYY-MM-DD>.md` (and the GutCall board if this repo writes one). Send Tim nothing on a no-edge day.
+- Message Tim only for (a) a play that clears the threshold, with price, price time, edge and fee basis, or (b) a failed check. Never report a check as run or done until its output file exists. Direct questions from Tim are answered as usual.
