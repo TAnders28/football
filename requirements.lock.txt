@@ -1,4 +1,4 @@
-# Frozen 2026-11-13 from E:\Football\football\.venv (Python 3.14.10), adds scikit-learn + matplotlib for the in-game model. Rebuild with .\bootstrap.ps1
+# Frozen 2026-11-13 from E:\AgentWorkspaces\Football\football\.venv (Python 3.14.10), adds scikit-learn + matplotlib for the in-game model. Rebuild with .\bootstrap.ps1
 annotated-types==0.8.0
 certifi==2026.10.23
 charset-normalizer==3.5.2

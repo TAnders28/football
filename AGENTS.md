@@ -58,7 +58,7 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: A
 
 ## Setup
 
-From `E:\Football\football`:
+From `E:\AgentWorkspaces\Football\football`:
 
 ```
 .\bootstrap.ps1
@@ -66,7 +66,7 @@ From `E:\Football\football`:
 
 Creates `.venv` with `py -3.14` if missing, installs pinned deps from `requirements.lock.txt`, and runs the unit tests. Use `.venv\Scripts\python.exe` after that.
 
-## Entry points (Windows, from `E:\Football\football`)
+## Entry points (Windows, from `E:\AgentWorkspaces\Football\football`)
 
 ```
 .venv\Scripts\python.exe -m Backtest.PredictDay --date YYYY-MM-DD [--week] [--next] [--no-refresh]
@@ -139,7 +139,7 @@ Creates `.venv` with `py -3.14` if missing, installs pinned deps from `requireme
 
 Four current-user tasks (no elevation, run only while Tim is logged on, MultipleInstances=IgnoreNew, 20 min limit, plus a
 file lock so runs never overlap). Each runs `.venv\Scripts\pythonw.exe -m Backtest.SnapshotRunner --label <label>` in
-`E:\Football\football` (no window), appends to `data/prices/snapshots_<season>.jsonl`, and logs to `data/logs/snapshots/<date>.log`.
+`E:\AgentWorkspaces\Football\football` (no window), appends to `data/prices/snapshots_<season>.jsonl`, and logs to `data/logs/snapshots/<date>.log`.
 Tomputer is on Pacific time; triggers are local (PT) = the ET slots minus 3 h:
 
 | task | label | triggers (PT) | ET intent |

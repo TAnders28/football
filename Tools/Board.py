@@ -1,12 +1,12 @@
 ﻿r"""
 GutCall board feed: one JSON per slate for Degen Bot's cross-sport dashboard (read-only, no orders).
 
-    E:\Football\football\.venv\Scripts\python.exe E:\Football\football\Tools\Board.py --league nfl
+    E:\AgentWorkspaces\Football\football\.venv\Scripts\python.exe E:\AgentWorkspaces\Football\football\Tools\Board.py --league nfl
     (cwd-independent; --date defaults to today in ET if that day still has an unfinished game, else the next slate
-     within 8 days. `python -m Tools.Board` also works from E:\Football\football.)
+     within 8 days. `python -m Tools.Board` also works from E:\AgentWorkspaces\Football\football.)
 
 Writes E:\AgentDocs\American-Footbot\_dashboard\board_latest.json and board_<date>.json.
-No E:\GutCall\gutcall\SCHEMA.md existed on 2026-11-14, so this follows the schema in the request:
+No E:\AgentWorkspaces\GutCall\gutcall\SCHEMA.md existed on 2026-11-14, so this follows the schema in the request:
   top: sport, generated_at (ISO -05:00), games[]
   game: game_id, start_time, home, away, status, score, market{home_yes_ask, away_yes_ask, open_home_yes, source, as_of},
         model{home_win_prob, model_name, tested}, edge_home_c, edge_away_c,

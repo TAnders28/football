@@ -1,6 +1,6 @@
 # Rebuild the repo venv from the pinned lockfile and run a smoke test.
 # Uses py -3.14 (E:\Installs\Python314). Does not request admin / UAC.
-# Usage (from E:\Football\football):  .\bootstrap.ps1
+# Usage (from E:\AgentWorkspaces\Football\football):  .\bootstrap.ps1
 
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot

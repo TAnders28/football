@@ -1,5 +1,5 @@
 r"""
-One command, from E:\Football\football:
+One command, from E:\AgentWorkspaces\Football\football:
 
     .venv\Scripts\python.exe -m Backtest.RunBacktest                      # 2023-2026, 5-pt edge
     .venv\Scripts\python.exe -m Backtest.RunBacktest --season 2025 --edge 0.03
