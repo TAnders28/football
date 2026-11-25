@@ -1,6 +1,6 @@
 # AGENTS.md — football (NFL modelling + betting backtests)
 
-Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: American Footbot.
+Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: Sportsbot (took over from American Footbot on 2026-11-25).
 
 ## Layout
 
@@ -34,7 +34,7 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: A
 | `DataPull/PullPbpSlim.py` | slim pre-play state play-by-play 2014-2026 (nflreadpy for 2014-22, local pbp jsonl for 2023+) -> `data/playbyplay/slim/pbp_slim_<season>.jsonl` |
 | `Backtest/InGameWP.py` | research: in-game win-probability model ingame_wp_v1 (pre-play state + pregame prior, standardized logistic, walk-forward by season) -> `data/models/ingame_wp_*.json`. UNVALIDATED for betting (2026-11-13: slightly worse than both markets) |
 | `Backtest/InGameModelEval.py` | research: held-out in-game model vs Kalshi/Polymarket on the same 1-min samples (calibration, Brier/log loss/ECE by quarter/season, mismatch P&L at mid after fees) |
-| `Backtest/LiveInGame.py` | live read for one game: ESPN state -> our UNVALIDATED in-game p next to AssessLive Kalshi/Polymarket book, fee-adjusted edge, appended to Degen's live file; action always PASS until VALIDATED (not scheduled) |
+| `Backtest/LiveInGame.py` | live read for one game: ESPN state -> our UNVALIDATED in-game p next to AssessLive Kalshi/Polymarket book, fee-adjusted edge, appended to the game-night live file (Sportsbot); action always PASS until VALIDATED (not scheduled) |
 | `Backtest/InGameRuleSim.py` | research/simulation: 13 pre-fixed in-game rules (close-game gap, early swings follow/fade, home 30-50 fade) on Kalshi 1-min held-out data, mid/taker fills, Tim's fee est + Kalshi verified fee, flat + quarter-Kelly bankrolls, PathSim. All PASS 2026-11-13 |
 | `Backtest/PathSim.py` | seeded randomized paths for day-level strategies: random start, block bootstrap, shuffle, restarts after ruin / bad start; P(ruin), P($1M), quantiles. `StakingEnv.RandomIdx` gives the same orders as `idx` |
 | `Backtest/BankrollPlot.py` | shared framing for bankroll charts under Tim's season-axis rule (one season: first game to last game; multi-season: game-day index with a marker at each season boundary, no offseason flats). `Backtest/RenderBankrollCharts.py` re-renders AgentDocs drafts from existing CSVs |
@@ -47,7 +47,7 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: A
 | `Backtest/ResidualSearch.py` | research: residual-on-market walk-forward search (offset logistic vs book close, 2,560-config grid, SPA / permutation, Kalshi T-60 apply of the frozen config). Simulation only |
 | `Backtest/SnapshotRunner.py` | scheduled entry for the price-capture tasks: single-instance lock, quiet logs to `data/logs/snapshots/` |
 | `Backtest/Calibration.py` | Brier / log loss / reliability bins of walk-forward models vs the de-vigged closing market (evaluation only) |
-| `Backtest/AssessLive.py`, `LiveReadiness.py`, `LiveFile.py` | one-shot read-only live odds/game state + Degen's live file |
+| `Backtest/AssessLive.py`, `LiveReadiness.py`, `LiveFile.py` | one-shot read-only live odds/game state + the game-night live file (Sportsbot) |
 | `PlayByPlay/` | play-by-play reconstruction/simulation. Kept separate from `Backtest/` |
 | `PlayByPlay/DriveCheck.py` | independent drive rebuild from raw pbp, validated against nflverse `fixed_drive` / result / play count |
 | `PlayByPlay/TeamEfficiency.py` | weekly team EPA/play + success rate (offense, defense, season-to-date) |
@@ -123,7 +123,7 @@ Creates `.venv` with `py -3.14` if missing, installs pinned deps from `requireme
 - **Fees.** Tim's working estimate is $0.02 per $1 contract: `edge = model_prob - price - 0.02`. Always
   label it "Tim's fee estimate" — it is not a verified exchange fee. Sportsbook odds are de-vigged first.
   Hit rate is not edge; compare with the market favourite on the same games.
-- **Live file (Degen).** `AssessLive` appends one row per market to
+- **Live file (Sportsbot, game nights).** `AssessLive` appends one row per market to
   `E:\AgentDocs\American-Footbot\<date>_live\<date>_live.jsonl` and overwrites `<date>_live_latest.md`.
   price_time/state_time are source timestamps; PASS "stale" if missing, > 60 s apart, or failing the
   repo's stricter limits (45 s live age, 20 s sync skew). PASS "no live model" without a validated
@@ -140,14 +140,14 @@ Creates `.venv` with `py -3.14` if missing, installs pinned deps from `requireme
 Four current-user tasks (no elevation, run only while Tim is logged on, MultipleInstances=IgnoreNew, 20 min limit, plus a
 file lock so runs never overlap). Each runs `.venv\Scripts\pythonw.exe -m Backtest.SnapshotRunner --label <label>` in
 `E:\AgentWorkspaces\Football\football` (no window), appends to `data/prices/snapshots_<season>.jsonl`, and logs to `data/logs/snapshots/<date>.log`.
-Tomputer is on Pacific time; triggers are local (PT) = the ET slots minus 3 h:
+Tomputer is on Eastern time (America/New_York, EST/EDT); triggers are local (ET), consistent with the task XML StartBoundary offsets:
 
-| task | label | triggers (PT) | ET intent |
+| task | label | triggers (ET) | ET intent |
 |---|---|---|---|
-| Footbot-Snapshot-Open | open | Tue 07:00 | Tue 10:00 opening prices |
-| Footbot-Snapshot-PostInjury | post_injury | Fri 14:00 | Fri 17:00 after final injury reports |
-| Footbot-Snapshot-T90 | T-90 | Sun 05:00, 08:30, 11:35, 15:50; Mon+Thu 15:45 | 90 min before the 9:30 / 1:00 / 4:05 / 8:20 Sunday windows and 8:15 TNF/MNF |
-| Footbot-Snapshot-T15 | T-15 | Sun 06:15, 09:45, 12:50, 17:05; Mon+Thu 17:00 | 15 min before the same windows |
+| Footbot-Snapshot-Open | open | Tue 10:00 | Tue 10:00 opening prices |
+| Footbot-Snapshot-PostInjury | post_injury | Fri 17:00 | Fri 17:00 after final injury reports |
+| Footbot-Snapshot-T90 | T-90 | Sun 08:00, 11:30, 14:35, 18:50; Mon+Thu 18:45 | 90 min before the 9:30 / 1:00 / 4:05 / 8:20 Sunday windows and 8:15 TNF/MNF |
+| Footbot-Snapshot-T15 | T-15 | Sun 09:15, 12:45, 15:50, 20:05; Mon+Thu 20:00 | 15 min before the same windows |
 
 Not covered: Saturday games (late season), Thanksgiving / Christmas specials. Check: `Get-ScheduledTask -TaskName "Footbot-Snapshot-*"`.
 **Disable:** `Get-ScheduledTask -TaskName "Footbot-Snapshot-*" | Disable-ScheduledTask` (re-enable with `Enable-ScheduledTask`).
