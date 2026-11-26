@@ -51,6 +51,7 @@ Rules for any bot or person working in this repo. Owner: Tim (TAnders28). Bot: S
 | `PlayByPlay/` | play-by-play reconstruction/simulation. Kept separate from `Backtest/` |
 | `PlayByPlay/DriveCheck.py` | independent drive rebuild from raw pbp, validated against nflverse `fixed_drive` / result / play count |
 | `PlayByPlay/TeamEfficiency.py` | weekly team EPA/play + success rate (offense, defense, season-to-date) |
+| `Sim/` | research (2026-11-26, tested:false): drive-level NFL resimulator. `Drives` (drive table from pbp 2023+ -> `data/sim/`), `DriveModel` (leak-free result model by state x field position + team factors), `GameSim` (vectorised Monte Carlo), `NearMiss` (re-roll some drives of a real game), `Anchor` (match a market price/total), `ValidateNfl` / `ValidateAnchored` / `ReportNfl` (holdout verdicts), `TidyCsv`. Failed validation on 2026-11-26 (key numbers 3/7 too rare, team-strength version miscalibrated): do not use downstream. Synthetic games are never real outcomes or proof of edge |
 | `tests/` | `python -m unittest discover -s tests` (no network, no `data/` needed) |
 | `bootstrap.ps1`, `requirements.lock.txt` | create `.venv` with `py -3.14` if missing, install pinned deps, run unit tests |
 | `docs/` | write-ups (`live-odds.md`) |
